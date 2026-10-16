@@ -2,11 +2,15 @@ import {
   Inbox, 
   Send, 
   AlertCircle, 
-  Sparkles
+  Sparkles,
+  LogOut
 
 } from "lucide-react";
 
-export default function NavigationDrawer() {
+/**
+ * @param {{ user: { name: string; email: string }; onSignOut: () => void; signOutError: string }} props
+ */
+export default function NavigationDrawer({ user, onSignOut, signOutError }) {
 
 
   return(
@@ -37,13 +41,27 @@ export default function NavigationDrawer() {
             
             <div className="p-4 border-t border-slate-800 flex items-center gap-3">
               <div className="h-8 w-8 rounded-full bg-black flex items-center justify-center text-xs font-bold text-slate-200">
-                SE
+                {user.name.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="text-xs font-medium truncate text-slate-300">SDE Candidate</span>
-                <span className="text-[10px] text-slate-500 truncate">user@iiitkalyani.ac.in</span>
+                <span className="text-xs font-medium truncate text-slate-300">{user.name}</span>
+                <span className="text-[10px] text-slate-500 truncate">{user.email}</span>
               </div>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="ml-auto rounded-md p-2 text-slate-400 transition hover:bg-slate-900 hover:text-white"
+                aria-label="Sign out"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
+            {signOutError && (
+              <p role="alert" className="px-4 pb-3 text-[11px] text-rose-400">
+                {signOutError}
+              </p>
+            )}
           </aside>
   )
 

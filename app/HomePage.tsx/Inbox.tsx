@@ -1,14 +1,24 @@
+
 'use client'
 
-import { EmailThread } from '../../Types/email'
+import { EmailThread } from '@/Types/email'
 import React, { useState } from 'react'
-import Navigationdrawer from '../../components/dashboard/Navigationdrawer'
-import MiddlePane from '../../components/dashboard/MiddlePane'
-import RightPane from '@/components/dashboard/RightPane'
-import { Menu } from 'lucide-react' // Added for a mobile sidebar toggle fallback
+import Navigationdrawer from '@/components/HomePage.tsx/Navigationdrawer'
+import MiddlePane from '@/components/HomePage.tsx/MiddlePane'
+import RightPane from '@/components/HomePage.tsx/RightPane'
 
-export default function DashboardPage () {
-  const [selectedThreadId, setSelectedThreadId] = useState<string>('1')
+
+interface InboxProps {
+  user: {
+    name: string;
+    email: string;
+  };
+  onSignOut: () => void;
+  signOutError: string;
+}
+
+export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
+   const [selectedThreadId, setSelectedThreadId] = useState<string>('1')
   const [aiSidebarOpen, setAiSidebarOpen] = useState<boolean>(false) // Default closed on smaller viewports
   const [leftSidebarOpen, setLeftSidebarOpen] = useState<boolean>(false) // Track mobile navigation state
 
@@ -42,6 +52,8 @@ export default function DashboardPage () {
   ])
 
   return (
+    <>
+
     <div className='flex h-screen w-screen bg-black text-slate-100 overflow-hidden font-sans relative'>
       
       {/* 1. MOBILE MENU BACKGROUND OVERLAYS */}
@@ -55,7 +67,11 @@ export default function DashboardPage () {
       {/* 2. LEFT PANE: Navigation Drawer */}
       {/* On mobile, it slides out from the left. On lg screens, it sits statically inline */}
       <div className={`fixed inset-y-0 left-0 z-50 transform ${leftSidebarOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0`}>
-        <Navigationdrawer />
+        <Navigationdrawer
+          user={user}
+          onSignOut={onSignOut}
+          signOutError={signOutError}
+        />
       </div>
 
       {/* 3. MIDDLE PANE: Thread Explorer & Main Mail View */}
@@ -77,5 +93,9 @@ export default function DashboardPage () {
         </div>
       )}
     </div>
+        </>
+    
   )
+  
+  
 }
