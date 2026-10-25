@@ -26,23 +26,20 @@ export default function GetStarted({
     setErrorMessage("");
     setIsSubmitting(true);
 
-    try {
-      await authClient.signIn.social({
-        provider: "google",
-        callbackURL: "/",
-        errorCallbackURL: "/",
-      });
-
-      // Better Auth normally redirects the browser to Google.
-      // Do not mark the user authenticated here.
-    } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Unable to connect. Please try again."
-      );
-      setIsSubmitting(false);
-    }
+try {
+    await authClient.signIn.social({
+      provider: "google",
+      callbackURL: "/dashboard", // Better to redirect directly to dashboard rather than "/"
+      errorCallbackURL: "/",
+    });
+  } catch (error) {
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : "Unable to connect. Please try again."
+    );
+    setIsSubmitting(false);
+  }
   }
 
   return (
