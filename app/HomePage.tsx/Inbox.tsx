@@ -13,7 +13,15 @@ import EmailDetailView from "@/components/HomePage.tsx/EmailDetailView";
 import EmailListView from "@/components/HomePage.tsx/EmailListView";
 import ScheduleModal from "@/components/HomePage.tsx/ScheduleModal";
 import Sidebar, { type EmailFilter } from "@/components/HomePage.tsx/Sidebar";
+import {
+  draftReply,
+  extractSchedule,
+  fetchEmailBody,
+  getApiBaseUrl,
+  sendReply,
+} from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { useGmailSync } from "@/lib/useGmailSync";
 
 type ToastMessage = { type: "success" | "error"; message: string };
 
@@ -73,12 +81,8 @@ interface InboxProps {
 }
 
 export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
-  const [threads, setThreads] = useState<EmailThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [currentFilter, setCurrentFilter] = useState<EmailFilter>("ALL");
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [apiError, setApiError] = useState("");
   const [replyDraft, setReplyDraft] = useState<ReplyDraft | null>(null);
   const [draftingEmailId, setDraftingEmailId] = useState<string | null>(null);
   const [bodyLoadingId, setBodyLoadingId] = useState<string | null>(null);
@@ -90,7 +94,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const apiBaseUrl = getApiBaseUrl();
 
   const notify = useCallback((message: string, type: ToastMessage["type"]) => {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
@@ -104,26 +108,6 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     },
     [],
   );
-
-  const getErrorMessage = useCallback(async (response: Response, fallback: string) => {
-    try {
-      const data: unknown = await response.json();
-      if (typeof data !== "object" || data === null) return fallback;
-      if ("detail" in data && typeof data.detail === "string") return data.detail;
-      if ("message" in data && typeof data.message === "string") return data.message;
-      if ("detail" in data && Array.isArray(data.detail)) {
-        const messages = data.detail.flatMap((item) =>
-          typeof item === "object" && item !== null && "msg" in item && typeof item.msg === "string"
-            ? [item.msg]
-            : [],
-        );
-        if (messages.length) return messages.join(" ");
-      }
-    } catch {
-      return fallback;
-    }
-    return fallback;
-  }, []);
 
   const getCaughtErrorMessage = useCallback(
     (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback),
@@ -144,51 +128,25 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     return tokenData.accessToken;
   }, []);
 
-  const loadEmails = useCallback(async () => {
-    setIsLoading(true);
-    setApiError("");
-    try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/emails`);
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Failed to retrieve emails."));
-      const json: { data?: EmailThread[] } = await response.json();
-      setThreads(Array.isArray(json.data) ? json.data : []);
-    } catch (error: unknown) {
-      setApiError(getCaughtErrorMessage(error, "Error fetching email records."));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [apiBaseUrl, getCaughtErrorMessage, getErrorMessage]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadEmails(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadEmails]);
+  const {
+    emails: threads,
+    setEmails: setThreads,
+    isLoading,
+    isRefreshing,
+    error: apiError,
+    watchError,
+    refresh: refreshEmails,
+  } = useGmailSync({ apiBaseUrl, enabled: true, getAccessToken: getGoogleToken });
 
   const loadEmailBody = useCallback(
     async (emailId: string) => {
       const token = await getGoogleToken();
-      const response = await fetch(
-        `${apiBaseUrl}/api/v1/emails/${encodeURIComponent(emailId)}/body`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Unable to load email body."));
-      const result: unknown = await response.json();
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        !("body" in result) ||
-        typeof result.body !== "string" ||
-        !("body_html" in result) ||
-        typeof result.body_html !== "string"
-      ) {
-        throw new Error("The email body response was invalid.");
-      }
-      const body = { body: result.body, body_html: result.body_html };
+      const body = await fetchEmailBody(apiBaseUrl, emailId, token);
       setThreads((current) =>
         current.map((thread) => (thread.id === emailId ? { ...thread, ...body } : thread)),
       );
     },
-    [apiBaseUrl, getErrorMessage, getGoogleToken],
+    [apiBaseUrl, getGoogleToken, setThreads],
   );
 
   const activeThread = threads.find((thread) => thread.id === selectedThreadId) || null;
@@ -234,24 +192,6 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
       .finally(() => setBodyLoadingId((current) => (current === emailId ? null : current)));
   };
 
-  const handleSyncEmails = async () => {
-    setIsSyncing(true);
-    setApiError("");
-    try {
-      const token = await getGoogleToken();
-      const response = await fetch(`${apiBaseUrl}/api/v1/emails/sync`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Email ingestion failed."));
-      await loadEmails();
-    } catch (error: unknown) {
-      setApiError(getCaughtErrorMessage(error, "Sync failed."));
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handleDraftReply = async (thread: EmailThread) => {
     if (!replyDraft || replyDraft.email_id !== thread.id) {
       setReplyDraft({
@@ -264,12 +204,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     setDraftingEmailId(thread.id);
     try {
       if (thread.body === undefined && thread.body_html === undefined) await loadEmailBody(thread.id);
-      const response = await fetch(`${apiBaseUrl}/api/draft`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email_id: thread.id }),
-      });
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Unable to draft a reply."));
+      const response = await draftReply(apiBaseUrl, thread.id);
       if (!response.body) throw new Error("The draft response did not include a stream.");
 
       const reader = response.body.getReader();
@@ -325,12 +260,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     setSendingEmailId(replyDraft.email_id);
     try {
       const token = await getGoogleToken();
-      const response = await fetch(`${apiBaseUrl}/api/send`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ email_id: replyDraft.email_id, body: replyDraft.reply_text }),
-      });
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Unable to send reply."));
+      await sendReply(apiBaseUrl, token, replyDraft.email_id, replyDraft.reply_text);
       setReplyDraft(null);
       notify("Reply sent.", "success");
     } catch (error: unknown) {
@@ -353,12 +283,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   const handleExtractMeeting = async (thread: EmailThread) => {
     setSchedulingEmailId(thread.id);
     try {
-      const response = await fetch(`${apiBaseUrl}/api/schedule`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email_id: thread.id }),
-      });
-      if (!response.ok) throw new Error(await getErrorMessage(response, "Unable to extract a meeting."));
+      const response = await extractSchedule(apiBaseUrl, thread.id);
 
       const result: unknown = await response.json();
       if (!isScheduleExtractionResponse(result)) {
@@ -474,7 +399,15 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
 
   return (
     <>
-      <main className="flex h-screen w-screen overflow-hidden bg-[#0b0c12] font-sans text-slate-100">
+      <main className="relative flex h-screen w-screen overflow-hidden bg-[#0b0c12] font-sans text-slate-100">
+        {activeThread && watchError && (
+          <div
+            role="alert"
+            className="absolute right-4 top-3 z-50 max-w-lg rounded-xl border border-rose-500/20 bg-[#1c1014] px-4 py-3 text-sm text-rose-200 shadow-xl"
+          >
+            {watchError}
+          </div>
+        )}
         <Sidebar
           user={user}
           currentFilter={currentFilter}
@@ -485,8 +418,6 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
           }}
           onSignOut={onSignOut}
           signOutError={signOutError}
-          onSync={() => void handleSyncEmails()}
-          isSyncing={isSyncing}
         />
         {activeThread ? (
           <EmailDetailView
@@ -526,8 +457,10 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             selectedEmailId={selectedThreadId}
             currentFilter={currentFilter}
             isLoading={isLoading}
+            isRefreshing={isRefreshing}
             error={apiError}
             onSelectEmail={setSelectedThreadId}
+            onRefresh={() => void refreshEmails()}
           />
         )}
       </main>

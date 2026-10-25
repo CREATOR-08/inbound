@@ -32,8 +32,8 @@ interface MiddlePaneProps {
   setAiSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>
   onMobileMenuToggle: () => void
   isLoading?: boolean
-  isSyncing?: boolean
-  onSync?: () => void
+  isRefreshing?: boolean
+  onRefresh?: () => void
   error?: string
   onDraftReply: (thread: EmailThread) => void
   onOpenReply: (thread: EmailThread) => void
@@ -65,8 +65,8 @@ export default function MiddlePane({
   setAiSidebarOpen,
   onMobileMenuToggle,
   isLoading = false,
-  isSyncing = false,
-  onSync,
+  isRefreshing = false,
+  onRefresh,
   error,
   onDraftReply,
   onOpenReply,
@@ -215,14 +215,14 @@ export default function MiddlePane({
             </h2>
           </div>
 
-          {onSync && (
+          {onRefresh && (
             <button
-              onClick={onSync}
-              disabled={isSyncing}
+              onClick={onRefresh}
+              disabled={isRefreshing}
               className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-500/20 transition disabled:opacity-50"
             >
-              <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync 24h'}</span>
+              <RefreshCw size={12} className={isRefreshing ? 'animate-spin' : ''} />
+              <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
             </button>
           )}
         </div>
@@ -243,7 +243,7 @@ export default function MiddlePane({
           ) : threads.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 p-6 text-center text-xs text-gray-500">
               <Mail size={24} className="opacity-30" />
-              <span>No emails ingested yet. Click Sync 24h to fetch from Gmail.</span>
+              <span>New emails will appear here as Gmail updates are processed.</span>
             </div>
           ) : (
             threads.map((thread) => {

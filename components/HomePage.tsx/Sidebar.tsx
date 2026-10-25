@@ -6,7 +6,6 @@ import {
   Inbox,
   Layers3,
   LogOut,
-  RefreshCw,
   ShieldAlert,
   Sparkles,
   Star,
@@ -27,8 +26,6 @@ interface SidebarProps {
   onSelectFilter: (filter: EmailFilter) => void;
   onSignOut: () => void;
   signOutError?: string;
-  onSync: () => void;
-  isSyncing: boolean;
 }
 
 const navItems: {
@@ -51,8 +48,6 @@ export default function Sidebar({
   onSelectFilter,
   onSignOut,
   signOutError,
-  onSync,
-  isSyncing,
 }: SidebarProps) {
   const initials = (user.name || user.email || "U")
     .split(/[\s@]/)
@@ -71,22 +66,6 @@ export default function Sidebar({
         <span className="whitespace-nowrap text-sm font-semibold text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
           Inbound<span className="text-violet-400">.ai</span>
         </span>
-      </div>
-
-      <div className="px-2 pt-4">
-        <button
-          type="button"
-          onClick={onSync}
-          disabled={isSyncing}
-          title={isSyncing ? "Syncing emails" : "Sync emails"}
-          aria-label={isSyncing ? "Syncing emails" : "Sync emails"}
-          className="flex h-10 w-full items-center gap-3 overflow-hidden rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 text-violet-200 transition hover:bg-violet-500/20 disabled:opacity-60"
-        >
-          <RefreshCw className={`h-4 w-4 shrink-0 ${isSyncing ? "animate-spin" : ""}`} />
-          <span className="whitespace-nowrap text-xs font-semibold opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-            {isSyncing ? "Syncing…" : "Sync inbox"}
-          </span>
-        </button>
       </div>
 
       <nav aria-label="Email folders" className="mt-5 flex-1 space-y-1 px-2">

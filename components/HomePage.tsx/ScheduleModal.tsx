@@ -7,6 +7,7 @@ import type {
   CalendarEventConfirmationResponse,
   ScheduleProposal,
 } from "@/Types/email";
+import { confirmCalendarEvent } from "@/lib/api";
 
 interface ScheduleModalProps {
   proposal: ScheduleProposal;
@@ -205,14 +206,7 @@ export default function ScheduleModal({
     setIsSubmitting(true);
     try {
       const token = await getAccessToken();
-      const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/calendar/confirm`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      const response = await confirmCalendarEvent(apiBaseUrl, token, payload);
       const result = await readResponsePayload(response);
       if (!response.ok) {
         throw new Error(getBackendError(result, `Calendar confirmation failed (${response.status}).`));

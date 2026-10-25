@@ -10,7 +10,6 @@ import {
   Calendar,
   CheckCircle2,
   Newspaper,
-  Layers,
 } from 'lucide-react'
 
 export type NavFilter = 'ALL' | 'URGENT' | 'ACTION_REQUIRED' | 'CALENDAR' | 'NEWSLETTER'
@@ -31,8 +30,8 @@ interface NavigationDrawerProps {
     events: number
     newsletters: number
   }
-  onSync?: () => void
-  isSyncing?: boolean
+  onRefresh?: () => void
+  isRefreshing?: boolean
 }
 
 export default function NavigationDrawer({
@@ -42,8 +41,8 @@ export default function NavigationDrawer({
   currentFilter = 'ALL',
   onSelectFilter = () => {},
   counts = { total: 0, urgent: 0, actionRequired: 0, events: 0, newsletters: 0 },
-  onSync,
-  isSyncing = false,
+  onRefresh,
+  isRefreshing = false,
 }: NavigationDrawerProps) {
   // Safely extract initials even if name is missing or single character
   const userInitials = (user.name || user.email || 'MF')
@@ -102,15 +101,15 @@ export default function NavigationDrawer({
         </div>
 
         {/* Global Sync Action Button */}
-        {onSync && (
+        {onRefresh && (
           <button
             type="button"
-            onClick={onSync}
-            disabled={isSyncing}
+            onClick={onRefresh}
+            disabled={isRefreshing}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-xl bg-violet-600/20 text-violet-300 border border-violet-500/30 hover:bg-violet-600/30 transition-all disabled:opacity-50"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? 'Ingesting Inbox...' : 'Sync Gmail (24h)'}</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Refreshing inbox...' : 'Refresh inbox'}</span>
           </button>
         )}
 
