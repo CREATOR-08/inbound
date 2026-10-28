@@ -7,11 +7,18 @@ import type { EmailThread } from "@/Types/email";
 interface UseGmailSyncOptions {
   apiBaseUrl: string;
   enabled: boolean;
-  getAccessToken: () => Promise<string>;
+  getAccessToken: (forceRefresh?: boolean) => Promise<string>;
 }
 
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
+
+const getEmailErrorMessage = (error: unknown) => {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+    return "Your Google access token was rejected. Please sign out and sign in again.";
+  }
+  return getErrorMessage(error, "Unable to refresh your inbox.");
+};
 
 export function useGmailSync({ apiBaseUrl, enabled, getAccessToken }: UseGmailSyncOptions) {
   const [emails, setEmails] = useState<EmailThread[]>([]);
@@ -21,22 +28,43 @@ export function useGmailSync({ apiBaseUrl, enabled, getAccessToken }: UseGmailSy
   const [watchError, setWatchError] = useState("");
   const watchAttempted = useRef(false);
   const refreshInFlight = useRef(false);
+  const authenticationFailed = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (allowAuthenticationRetry = false) => {
     if (refreshInFlight.current) return;
+    if (authenticationFailed.current && !allowAuthenticationRetry) return;
+    const forceTokenRefresh = authenticationFailed.current && allowAuthenticationRetry;
+    if (allowAuthenticationRetry) authenticationFailed.current = false;
     refreshInFlight.current = true;
     setIsRefreshing(true);
     try {
-      setEmails(await fetchEmails(apiBaseUrl));
+      let token: string;
+      try {
+        token = await getAccessToken(forceTokenRefresh);
+      } catch (error: unknown) {
+        authenticationFailed.current = true;
+        throw error;
+      }
+
+      try {
+        setEmails(await fetchEmails(apiBaseUrl, token));
+      } catch (error: unknown) {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          authenticationFailed.current = true;
+        }
+        throw error;
+      }
       setEmailError("");
     } catch (error: unknown) {
-      setEmailError(getErrorMessage(error, "Unable to refresh your inbox."));
+      setEmailError(getEmailErrorMessage(error));
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
       refreshInFlight.current = false;
     }
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, getAccessToken]);
+
+  const refreshManually = useCallback(() => refresh(true), [refresh]);
 
   useEffect(() => {
     if (!enabled || watchAttempted.current) return;
@@ -60,16 +88,11 @@ export function useGmailSync({ apiBaseUrl, enabled, getAccessToken }: UseGmailSy
   useEffect(() => {
     if (!enabled) return;
 
-    const initialRefresh = window.setTimeout(() => void refresh(), 0);
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 20_000);
+    void refresh();
     const handleFocus = () => void refresh();
     window.addEventListener("focus", handleFocus);
 
     return () => {
-      window.clearTimeout(initialRefresh);
-      window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
     };
   }, [enabled, refresh]);
@@ -80,7 +103,8 @@ export function useGmailSync({ apiBaseUrl, enabled, getAccessToken }: UseGmailSy
     isLoading,
     isRefreshing,
     error: watchError || emailError,
+    emailError,
     watchError,
-    refresh,
+    refresh: refreshManually,
   };
 }

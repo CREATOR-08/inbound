@@ -14,6 +14,7 @@ import EmailListView from "@/components/HomePage.tsx/EmailListView";
 import ScheduleModal from "@/components/HomePage.tsx/ScheduleModal";
 import Sidebar, { type EmailFilter } from "@/components/HomePage.tsx/Sidebar";
 import {
+  ApiError,
   draftReply,
   extractSchedule,
   fetchEmailBody,
@@ -93,6 +94,12 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   const [scheduledEmailIds, setScheduledEmailIds] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const toastTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const googleAccountId = useRef<string | null>(null);
+  const googleAccountRequest = useRef<Promise<string> | null>(null);
+  const accessTokenCache = useRef<{ token: string; expiresAt: number } | null>(null);
+  const accessTokenRequest = useRef<Promise<string> | null>(null);
+  const bodyCache = useRef(new Map<string, Awaited<ReturnType<typeof fetchEmailBody>>>());
+  const bodyRequests = useRef(new Map<string, Promise<Awaited<ReturnType<typeof fetchEmailBody>>>>());
 
   const apiBaseUrl = getApiBaseUrl();
 
@@ -114,18 +121,57 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     [],
   );
 
-  const getGoogleToken = useCallback(async (): Promise<string> => {
-    const { data: accounts } = await authClient.listAccounts();
-    const googleAccount = accounts?.find((account) => account.providerId === "google");
-    if (!googleAccount) {
-      throw new Error("Google account link missing. Please log in again.");
+  const getGoogleToken = useCallback(async (forceRefresh = false): Promise<string> => {
+    if (forceRefresh) accessTokenCache.current = null;
+    const cachedToken = accessTokenCache.current;
+    if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
+      return cachedToken.token;
     }
+    if (accessTokenRequest.current) return accessTokenRequest.current;
 
-    const { data: tokenData } = await authClient.getAccessToken({ accountId: googleAccount.id });
-    if (!tokenData?.accessToken) {
-      throw new Error("Could not fetch an active Google access token.");
+    const request = (async () => {
+      let accountId = googleAccountId.current;
+      if (!accountId) {
+        if (!googleAccountRequest.current) {
+          googleAccountRequest.current = (async () => {
+            const { data: accounts } = await authClient.listAccounts();
+            const googleAccount = accounts?.find((account) => account.providerId === "google");
+            if (!googleAccount) {
+              throw new Error("Google account link missing. Please log in again.");
+            }
+            googleAccountId.current = googleAccount.id;
+            return googleAccount.id;
+          })();
+        }
+        try {
+          accountId = await googleAccountRequest.current;
+        } finally {
+          googleAccountRequest.current = null;
+        }
+      }
+
+      const { data: tokenData } = await authClient.getAccessToken({ accountId });
+      if (typeof tokenData?.accessToken !== "string" || !tokenData.accessToken.trim()) {
+        throw new Error("Could not fetch an active Google access token.");
+      }
+      const expiresAt =
+        tokenData.accessTokenExpiresAt instanceof Date
+          ? tokenData.accessTokenExpiresAt.getTime()
+          : typeof tokenData.accessTokenExpiresAt === "string"
+            ? Date.parse(tokenData.accessTokenExpiresAt)
+            : Number.NaN;
+      if (Number.isFinite(expiresAt)) {
+        accessTokenCache.current = { token: tokenData.accessToken, expiresAt };
+      }
+      return tokenData.accessToken;
+    })();
+
+    accessTokenRequest.current = request;
+    try {
+      return await request;
+    } finally {
+      if (accessTokenRequest.current === request) accessTokenRequest.current = null;
     }
-    return tokenData.accessToken;
   }, []);
 
   const {
@@ -134,17 +180,44 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     isLoading,
     isRefreshing,
     error: apiError,
+    emailError,
     watchError,
     refresh: refreshEmails,
   } = useGmailSync({ apiBaseUrl, enabled: true, getAccessToken: getGoogleToken });
 
   const loadEmailBody = useCallback(
     async (emailId: string) => {
-      const token = await getGoogleToken();
-      const body = await fetchEmailBody(apiBaseUrl, emailId, token);
-      setThreads((current) =>
-        current.map((thread) => (thread.id === emailId ? { ...thread, ...body } : thread)),
-      );
+      const cachedBody = bodyCache.current.get(emailId);
+      if (cachedBody) {
+        setThreads((current) =>
+          current.map((thread) => (thread.id === emailId ? { ...thread, ...cachedBody } : thread)),
+        );
+        return cachedBody;
+      }
+
+      const existingRequest = bodyRequests.current.get(emailId);
+      if (existingRequest) return existingRequest;
+
+      const request = (async () => {
+        const token = await getGoogleToken();
+        const body = await fetchEmailBody(apiBaseUrl, emailId, token);
+        bodyCache.current.set(emailId, body);
+        setThreads((current) =>
+          current.map((thread) => (thread.id === emailId ? { ...thread, ...body } : thread)),
+        );
+        return body;
+      })();
+      bodyRequests.current.set(emailId, request);
+      try {
+        return await request;
+      } catch (error: unknown) {
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          accessTokenCache.current = null;
+        }
+        throw error;
+      } finally {
+        if (bodyRequests.current.get(emailId) === request) bodyRequests.current.delete(emailId);
+      }
     },
     [apiBaseUrl, getGoogleToken, setThreads],
   );
@@ -459,6 +532,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             isLoading={isLoading}
             isRefreshing={isRefreshing}
             error={apiError}
+            hasLoadError={Boolean(emailError)}
             onSelectEmail={setSelectedThreadId}
             onRefresh={() => void refreshEmails()}
           />

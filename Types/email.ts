@@ -56,21 +56,21 @@ export interface ReplyDraft {
 
 export interface EmailThread {
   id: string;
-  thread_id?: string;
+  thread_id: string | null;
   sender: string;
+  subject: string;
+  preview: string;
+  received_at: string | null;
+  category: string | null;
+  priority: string | null;
+  is_archived: boolean;
   recipient?: string;
   to?: string;
-  subject: string;
-  preview?: string;
   body?: string;
   body_html?: string;
   date?: string;
-  received_at?: string | null;
-  category: "IMPORTANT" | "CASUAL" | "SPAM" | "NEWSLETTER" | "ACTION_REQUIRED" | string;
-  priority: "HIGH" | "MEDIUM" | "LOW" | string;
   reply_outline?: string[];
   suggested_reply?: string;
   calendar_event?: CalendarEventDraft | null;
-  is_archived?: boolean;
   is_read?: boolean;
 }

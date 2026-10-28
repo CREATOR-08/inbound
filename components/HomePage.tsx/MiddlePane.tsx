@@ -92,7 +92,7 @@ export default function MiddlePane({
   const activeThread = threads.find((t) => t.id === selectedThreadId)
   const replyEditorRef = React.useRef<HTMLTextAreaElement>(null)
 
-  const getPriorityStyle = (priority: string) => {
+  const getPriorityStyle = (priority: string | null) => {
     switch (priority?.toUpperCase()) {
       case 'HIGH':
         return 'bg-rose-500/10 text-rose-400 border-rose-500/20'

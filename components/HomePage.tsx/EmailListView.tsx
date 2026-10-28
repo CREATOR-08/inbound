@@ -11,6 +11,7 @@ interface EmailListViewProps {
   isLoading: boolean;
   isRefreshing: boolean;
   error: string;
+  hasLoadError: boolean;
   onSelectEmail: (emailId: string) => void;
   onRefresh: () => void;
 }
@@ -39,6 +40,7 @@ export default function EmailListView({
   isLoading,
   isRefreshing,
   error,
+  hasLoadError,
   onSelectEmail,
   onRefresh,
 }: EmailListViewProps) {
@@ -85,6 +87,14 @@ export default function EmailListView({
         {isLoading ? (
           <div role="status" className="flex h-48 items-center justify-center text-sm text-slate-500">
             Loading emails…
+          </div>
+        ) : threads.length === 0 && hasLoadError ? (
+          <div role="status" className="flex h-64 flex-col items-center justify-center gap-3 px-6 text-center">
+            <Mail className="h-8 w-8 text-slate-700" />
+            <p className="text-sm font-medium text-slate-300">Inbox could not be loaded</p>
+            <p className="max-w-sm text-xs leading-relaxed text-slate-500">
+              Resolve the error above, then refresh to try again.
+            </p>
           </div>
         ) : threads.length === 0 ? (
           <div className="flex h-64 flex-col items-center justify-center gap-3 px-6 text-center">

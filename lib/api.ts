@@ -31,55 +31,134 @@ const getEndpoint = (baseUrl: string, path: string) =>
 
 const readErrorMessage = async (response: Response) => {
   const body = await response.text();
-  if (!body) return `Request failed (${response.status}).`;
+  if (!body) return "The server returned no error details.";
 
+  let payload: unknown;
   try {
-    const payload: unknown = JSON.parse(body);
-    if (typeof payload === "object" && payload !== null) {
-      if ("detail" in payload && typeof payload.detail === "string") return payload.detail;
-      if ("message" in payload && typeof payload.message === "string") return payload.message;
-    }
+    payload = JSON.parse(body) as unknown;
   } catch {
-    return body;
+    return "The server returned an unreadable error response.";
   }
-  return body;
+
+  if (typeof payload !== "object" || payload === null) {
+    return "The server returned no error details.";
+  }
+
+  const redactCredentials = (message: string) =>
+    message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 1000);
+  if ("detail" in payload && typeof payload.detail === "string") {
+    return redactCredentials(payload.detail);
+  }
+  if ("detail" in payload && Array.isArray(payload.detail)) {
+    const messages = payload.detail.flatMap((issue) => {
+      if (
+        typeof issue !== "object" ||
+        issue === null ||
+        !("msg" in issue) ||
+        typeof issue.msg !== "string"
+      ) {
+        return [];
+      }
+      const location =
+        "loc" in issue && Array.isArray(issue.loc)
+          ? issue.loc.filter((part: unknown): part is string => typeof part === "string").join(".")
+          : "";
+      return [redactCredentials(location ? `${location}: ${issue.msg}` : issue.msg)];
+    });
+    if (messages.length > 0) return messages.join("; ");
+  }
+  if ("message" in payload && typeof payload.message === "string") {
+    return redactCredentials(payload.message);
+  }
+  return "The server returned no error details.";
 };
 
 const request = async (baseUrl: string, path: string, init?: RequestInit) => {
-  const response = await fetch(getEndpoint(baseUrl, path), init);
+  const headers = new Headers(init?.headers);
+  const response = await fetch(getEndpoint(baseUrl, path), { ...init, headers });
   if (!response.ok) {
-    throw new ApiError(await readErrorMessage(response), response.status);
+    const details = await readErrorMessage(response);
+    throw new ApiError(`Request failed with status ${response.status}: ${details}`, response.status);
   }
   return response;
 };
 
-const isEmailThread = (value: unknown): value is EmailThread =>
-  typeof value === "object" &&
-  value !== null &&
-  "id" in value &&
-  typeof value.id === "string" &&
-  "sender" in value &&
-  typeof value.sender === "string" &&
-  "subject" in value &&
-  typeof value.subject === "string" &&
-  "category" in value &&
-  typeof value.category === "string" &&
-  "priority" in value &&
-  typeof value.priority === "string";
+const isStringOrNull = (value: unknown): value is string | null =>
+  value === null || typeof value === "string";
 
-export async function fetchEmails(baseUrl: string): Promise<EmailThread[]> {
-  const response = await request(baseUrl, "/api/v1/emails");
-  const payload: unknown = await response.json();
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    !("data" in payload) ||
-    !Array.isArray(payload.data) ||
-    !payload.data.every(isEmailThread)
-  ) {
-    throw new Error("The email list response was invalid.");
+const getEmailThreadValidationError = (value: unknown): string | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return "record must be an object";
   }
-  return payload.data;
+
+  if (!("id" in value) || typeof value.id !== "string") {
+    return "id must be a string";
+  }
+  if (!("sender" in value) || typeof value.sender !== "string") {
+    return "sender must be a string";
+  }
+  if (!("subject" in value) || typeof value.subject !== "string") {
+    return "subject must be a string";
+  }
+  if (!("thread_id" in value) || !isStringOrNull(value.thread_id)) {
+    return "thread_id must be a string or null";
+  }
+  if (!("preview" in value) || typeof value.preview !== "string") {
+    return "preview must be a string";
+  }
+  if (!("received_at" in value) || !isStringOrNull(value.received_at)) {
+    return "received_at must be a string or null";
+  }
+  if (!("category" in value) || !isStringOrNull(value.category)) {
+    return "category must be a string or null";
+  }
+  if (!("priority" in value) || !isStringOrNull(value.priority)) {
+    return "priority must be a string or null";
+  }
+  if (!("is_archived" in value) || typeof value.is_archived !== "boolean") {
+    return "is_archived must be a boolean";
+  }
+
+  return null;
+};
+
+export async function fetchEmails(baseUrl: string, token: string): Promise<EmailThread[]> {
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("An active Google access token is required to load emails.");
+  }
+  const response = await request(baseUrl, "/api/v1/emails", {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload: unknown = await response.json();
+  let emails: unknown[];
+  if (Array.isArray(payload)) {
+    emails = payload;
+  } else if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "data" in payload
+  ) {
+    if (!Array.isArray(payload.data)) {
+      throw new Error('The email list response was invalid: field "data" must be an array.');
+    }
+    emails = payload.data;
+  } else {
+    throw new Error('The email list response was invalid: field "data" must be an array.');
+  }
+
+  let firstInvalidRecord: string | null = null;
+  emails.forEach((email, index) => {
+    const validationError = getEmailThreadValidationError(email);
+    if (validationError && firstInvalidRecord === null) {
+      firstInvalidRecord = `record ${index}: ${validationError}`;
+    }
+  });
+  if (firstInvalidRecord !== null) {
+    throw new Error(`The email list response was invalid: ${firstInvalidRecord}.`);
+  }
+
+  return emails as EmailThread[];
 }
 
 export async function fetchEmailBody(baseUrl: string, emailId: string, token: string) {
