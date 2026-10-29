@@ -9,6 +9,14 @@
 //   aiClassification: "URGENT" | "ROUTINE" | "NEWSLETTER";
 //   summary?: string;
 // }
+export type EmailFilter =
+  | "ALL"
+  | "TRIAGED"
+  | "URGENT"
+  | "HIGH_PRIORITY"
+  | "SCHEDULED"
+  | "ARCHIVE";
+
 export interface CalendarEventDraft {
   draft_id: string;
   title: string;

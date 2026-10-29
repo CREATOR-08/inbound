@@ -10,14 +10,8 @@ import {
   Sparkles,
   Star,
 } from "lucide-react";
-
-export type EmailFilter =
-  | "ALL"
-  | "TRIAGED"
-  | "URGENT"
-  | "HIGH_PRIORITY"
-  | "SCHEDULED"
-  | "ARCHIVE";
+import type { EmailFilter } from "@/Types/email";
+export type { EmailFilter } from "@/Types/email";
 
 interface SidebarProps {
   user: { name?: string; email: string };

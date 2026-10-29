@@ -1,8 +1,7 @@
 "use client";
 
 import { CalendarClock, Mail, RefreshCw, ShieldAlert, Star } from "lucide-react";
-import type { EmailThread } from "@/Types/email";
-import type { EmailFilter } from "./Sidebar";
+import type { EmailFilter, EmailThread } from "@/Types/email";
 
 interface EmailListViewProps {
   threads: EmailThread[];
