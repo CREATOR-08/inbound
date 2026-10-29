@@ -8,6 +8,8 @@ import ScheduleModal from "@/components/HomePage.tsx/ScheduleModal";
 import Sidebar from "@/components/HomePage.tsx/Sidebar";
 import Toast from "@/components/HomePage.tsx/Toast";
 import { getApiBaseUrl } from "@/lib/api";
+import { collectAssistantPageContext } from "@/lib/assistant-context";
+import type { AssistantEmailSummary } from "@/Types/assistant";
 import { useGmailSync } from "@/lib/useGmailSync";
 import { useEmailBody } from "@/hooks/useEmailBody";
 import { useEmailActions } from "@/hooks/useEmailActions";
@@ -24,7 +26,7 @@ interface InboxProps {
 export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [currentFilter, setCurrentFilter] = useState<EmailFilter>("ALL");
-  const [isAssistantOpen, setIsAssistantOpen] = useState(true);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
   const apiBaseUrl = getApiBaseUrl();
   const { getAccessToken: getGoogleToken, invalidateAccessToken } = useGoogleAccessToken();
@@ -82,6 +84,26 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
 
   const toggleSelectedEmailRead = () => {
     if (activeThread) emailActions.toggleEmailRead(activeThread.id);
+  };
+
+  const openAssistantResult = (result: AssistantEmailSummary) => {
+    setThreads((current) =>
+      current.some((thread) => thread.id === result.id)
+        ? current
+        : [
+            {
+              ...result,
+              date: result.received_at ?? undefined,
+            },
+            ...current,
+          ],
+    );
+    setSelectedThreadId(result.id);
+  };
+
+  const openAssistantActionEmail = (emailId: string) => {
+    if (!threads.some((thread) => thread.id === emailId)) return;
+    setSelectedThreadId(emailId);
   };
 
   return (
@@ -144,6 +166,23 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
           />
         )}
       </main>
+
+      <AssistantPanel
+        apiBaseUrl={apiBaseUrl}
+        getAccessToken={getGoogleToken}
+        pageContext={collectAssistantPageContext(currentFilter, activeThread?.id ?? null)}
+        availableEmailIds={new Set(threads.map((thread) => thread.id))}
+        onOpenEmail={openAssistantActionEmail}
+        onOpenResultEmail={openAssistantResult}
+        onNavigateToInbox={() => setSelectedThreadId("")}
+        onSetFilter={(filter) => {
+          setCurrentFilter(filter);
+          setSelectedThreadId("");
+        }}
+        isOpen={isAssistantOpen}
+        onOpen={() => setIsAssistantOpen(true)}
+        onClose={() => setIsAssistantOpen(false)}
+      />
 
       {emailActions.scheduleProposal && (
         <ScheduleModal
