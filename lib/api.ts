@@ -22,6 +22,10 @@ export interface WatchRegistrationResponse {
   };
 }
 
+export interface InitialEmailSyncResponse {
+  status: "completed" | "already_completed";
+}
+
 /**
  * Normalize the API base URL.
  *
@@ -258,6 +262,44 @@ export async function fetchEmails(
   }
 
   return emails as EmailThread[];
+}
+
+/**
+ * POST /api/v1/emails/sync-initial
+ *
+ * Import the authenticated user's historical emails if the initial sync has
+ * not already completed.
+ */
+export async function syncInitialEmails(
+  baseUrl: string,
+  token: string,
+): Promise<InitialEmailSyncResponse> {
+  if (!token.trim()) {
+    throw new Error(
+      "An active Google access token is required to sync emails.",
+    );
+  }
+
+  const response = await request(baseUrl, "/api/v1/emails/sync-initial", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const payload: unknown = await response.json();
+
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("status" in payload) ||
+    (payload.status !== "completed" &&
+      payload.status !== "already_completed")
+  ) {
+    throw new Error("The initial email sync response was invalid.");
+  }
+
+  return { status: payload.status };
 }
 
 /**
