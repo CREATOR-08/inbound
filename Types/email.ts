@@ -25,6 +25,7 @@ export interface CalendarEventDraft {
   status: "PENDING" | "APPROVED" | "CANCELLED";
   attendees: string[];
   confidence?: number;
+  ambiguity?: string | null;
 }
 
 export interface ScheduleProposal extends CalendarEventDraft {

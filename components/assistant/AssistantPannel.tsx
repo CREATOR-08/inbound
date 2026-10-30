@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, Trash2, X } from "lucide-react";
+import { Minus, Sparkles, Trash2, X } from "lucide-react";
 import type {
   AssistantCommandRequest,
   AssistantConversationMessage,
@@ -303,6 +303,15 @@ export default function AssistantPanel({
         </div>
 
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Minimize AI assistant"
+            title="Minimize assistant"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white/[0.06] hover:text-white"
+          >
+            <Minus className="h-4 w-4" aria-hidden="true" />
+          </button>
           {messages.length > 0 && (
             <button
               type="button"

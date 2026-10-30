@@ -8,6 +8,11 @@ import type {
   ScheduleProposal,
 } from "@/Types/email";
 import { confirmCalendarEvent } from "@/lib/api";
+import {
+  formatIstCalendarDateTime,
+  isoToIstDateTimeInput,
+  istDateTimeInputToIso,
+} from "@/lib/calendar-time";
 
 interface ScheduleModalProps {
   proposal: ScheduleProposal;
@@ -19,19 +24,6 @@ interface ScheduleModalProps {
     payload: CalendarEventConfirmationPayload,
   ) => void;
 }
-
-const isoToLocalDateTime = (value: string) => {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return "";
-  const pad = (number: number) => String(number).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-const localDateTimeToIso = (value: string) => {
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
-};
-
 const isValidEmail = (value: string) =>
   /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(value);
 
@@ -78,13 +70,13 @@ export default function ScheduleModal({
   onSuccess,
 }: ScheduleModalProps) {
   const [title, setTitle] = useState(proposal.title);
-  const [startTime, setStartTime] = useState(() => isoToLocalDateTime(proposal.start_time));
-  const [endTime, setEndTime] = useState(() => isoToLocalDateTime(proposal.end_time));
+  const [startTime, setStartTime] = useState(() => isoToIstDateTimeInput(proposal.start_time));
+  const [endTime, setEndTime] = useState(() => isoToIstDateTimeInput(proposal.end_time));
   const [attendees, setAttendees] = useState(proposal.attendees);
   const [attendeeInput, setAttendeeInput] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmation, setConfirmation] = useState<CalendarEventConfirmationResponse | null>(null);
+  const [confirmation, setConfirmation] = useState<{ startTime: string; endTime: string } | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const successButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -184,8 +176,8 @@ export default function ScheduleModal({
       setError("Enter an event title.");
       return;
     }
-    const isoStart = localDateTimeToIso(startTime);
-    const isoEnd = localDateTimeToIso(endTime);
+    const isoStart = istDateTimeInputToIso(startTime);
+    const isoEnd = istDateTimeInputToIso(endTime);
     if (!isoStart || !isoEnd) {
       setError("Enter valid start and end dates and times.");
       return;
@@ -226,7 +218,10 @@ export default function ScheduleModal({
         status: "success",
         google_event_id: result.google_event_id,
       };
-      setConfirmation(confirmedResult);
+      setConfirmation({
+        startTime: payload.start_time,
+        endTime: payload.end_time,
+      });
       onSuccess(confirmedResult, payload);
     } catch (caughtError: unknown) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to confirm the calendar event.");
@@ -260,7 +255,9 @@ export default function ScheduleModal({
               Added to Google Calendar
             </h2>
             <p role="status" className="mt-2 text-sm text-slate-400">
-              “{title.trim()}” has been confirmed.
+              “{title.trim()}” is scheduled for{" "}
+              {formatIstCalendarDateTime(confirmation.startTime)} –{" "}
+              {formatIstCalendarDateTime(confirmation.endTime)} (IST).
             </p>
             <button
               ref={successButtonRef}
@@ -304,6 +301,16 @@ export default function ScheduleModal({
               </div>
             )}
 
+            {proposal.confidence === 0 && (
+              <p
+                role="status"
+                className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-3.5 py-3 text-xs leading-relaxed text-amber-100"
+              >
+                {proposal.ambiguity ||
+                  "The email does not provide complete, unambiguous event times. Enter the start and end times manually."}
+              </p>
+            )}
+
             <div className="space-y-4">
               <label className="block text-xs font-medium text-slate-300">
                 Event title
@@ -318,7 +325,7 @@ export default function ScheduleModal({
               </label>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <label className="block text-xs font-medium text-slate-300">
-                  Start date &amp; time
+                  Start date &amp; time (IST)
                   <input
                     type="datetime-local"
                     required
@@ -329,7 +336,7 @@ export default function ScheduleModal({
                   />
                 </label>
                 <label className="block text-xs font-medium text-slate-300">
-                  End date &amp; time
+                  End date &amp; time (IST)
                   <input
                     type="datetime-local"
                     required

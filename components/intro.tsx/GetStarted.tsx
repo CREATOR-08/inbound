@@ -29,7 +29,7 @@ export default function GetStarted({
 try {
     await authClient.signIn.social({
       provider: "google",
-      callbackURL: "/dashboard", // Better to redirect directly to dashboard rather than "/"
+      callbackURL: "/", 
       errorCallbackURL: "/",
     });
   } catch (error) {

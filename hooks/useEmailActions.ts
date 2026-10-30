@@ -73,7 +73,8 @@ export function useEmailActions({
         if (email.body === undefined && email.body_html === undefined) {
           await loadEmailBody(email.id);
         }
-        const response = await requestReplyDraft(apiBaseUrl, email.id);
+        const token=await getAccessToken();
+        const response = await requestReplyDraft(apiBaseUrl,token, email.id);
         if (!response.body) throw new Error("The draft response did not include a stream.");
 
         const reader = response.body.getReader();
@@ -153,31 +154,58 @@ export function useEmailActions({
     }
   }, [notify, replyDraft]);
 
-  const extractMeeting = useCallback(
-    async (email: EmailThread) => {
-      setSchedulingEmailId(email.id);
-      try {
-        const response = await extractSchedule(apiBaseUrl, email.id);
-        const result: unknown = await response.json();
-        if (!isScheduleExtractionResponse(result)) {
-          throw new Error("The schedule response did not include a calendar proposal.");
-        }
-        const event = result.calendar_event;
-        if (
-          !Number.isFinite(new Date(event.start_time).getTime()) ||
-          !Number.isFinite(new Date(event.end_time).getTime())
-        ) {
-          throw new Error("The calendar proposal contained an invalid date or time.");
-        }
-        setScheduleProposal({ ...event, email_id: email.id });
-      } catch (error: unknown) {
-        notify(getErrorMessage(error, "Unable to extract a meeting."), "error");
-      } finally {
-        setSchedulingEmailId(null);
+const extractMeeting = useCallback(
+  async (email: EmailThread) => {
+    setSchedulingEmailId(email.id);
+
+    try {
+      const token = await getAccessToken();
+
+      const response = await extractSchedule(
+        apiBaseUrl,
+        token,
+        email.id,
+      );
+
+      const result: unknown = await response.json();
+
+      if (!isScheduleExtractionResponse(result)) {
+        throw new Error(
+          "The schedule response did not include a calendar proposal.",
+        );
       }
-    },
-    [apiBaseUrl, notify],
-  );
+
+      const event = result.calendar_event;
+      const needsManualSchedule =
+        event.confidence === 0 &&
+        event.start_time === "" &&
+        event.end_time === "";
+
+      if (
+        !needsManualSchedule &&
+        (!Number.isFinite(new Date(event.start_time).getTime()) ||
+          !Number.isFinite(new Date(event.end_time).getTime()))
+      ) {
+        throw new Error(
+          "The calendar proposal contained an invalid date or time.",
+        );
+      }
+
+      setScheduleProposal({
+        ...event,
+        email_id: email.id,
+      });
+    } catch (error: unknown) {
+      notify(
+        getErrorMessage(error, "Unable to extract a meeting."),
+        "error",
+      );
+    } finally {
+      setSchedulingEmailId(null);
+    }
+  },
+  [apiBaseUrl, getAccessToken, notify],
+);
 
   const archiveEmail = useCallback(
     (emailId: string) => {
