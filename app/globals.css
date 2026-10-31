@@ -9,3 +9,22 @@ body {
 body {
   background: #030407;
 }
+
+@keyframes inbox-mail-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes inbox-sync-progress {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}

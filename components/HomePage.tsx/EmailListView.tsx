@@ -8,8 +8,11 @@ interface EmailListViewProps {
   selectedEmailId: string;
   currentFilter: EmailFilter;
   isLoading: boolean;
+  isInitialSyncing: boolean;
+  initialSyncFailed: boolean;
   isRefreshing: boolean;
   error: string;
+  syncError: string;
   hasLoadError: boolean;
   onSelectEmail: (emailId: string) => void;
   onRefresh: () => void;
@@ -37,8 +40,11 @@ export default function EmailListView({
   selectedEmailId,
   currentFilter,
   isLoading,
+  isInitialSyncing,
+  initialSyncFailed,
   isRefreshing,
   error,
+  syncError,
   hasLoadError,
   onSelectEmail,
   onRefresh,
@@ -83,7 +89,66 @@ export default function EmailListView({
           <span>Priority</span>
         </div>
 
-        {isLoading ? (
+        {threads.length === 0 && isInitialSyncing ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center"
+          >
+            <div className="relative mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-violet-400/15 bg-violet-500/[0.07]">
+              <span className="absolute inset-0 rounded-2xl border border-violet-300/15 animate-pulse" />
+              <Mail className="h-6 w-6 text-violet-300 animate-[inbox-mail-float_2.8s_ease-in-out_infinite] motion-reduce:animate-none" />
+            </div>
+            <h2 className="text-sm font-semibold tracking-tight text-slate-100">
+              Preparing your inbox
+            </h2>
+            <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-400">
+              Your initial setup may take a little time. We&apos;re syncing your
+              emails from the last 3 days.
+            </p>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Fetching and organizing your emails...
+            </p>
+            <div
+              aria-hidden="true"
+              className="mt-6 h-1 w-40 overflow-hidden rounded-full bg-white/[0.06]"
+            >
+              <div className="h-full w-1/3 rounded-full bg-violet-400/70 animate-[inbox-sync-progress_2s_ease-in-out_infinite] motion-reduce:animate-none" />
+            </div>
+            {syncError && (
+              <div className="mt-5 flex flex-col items-center gap-3">
+                <p className="max-w-sm text-xs text-amber-200/80">{syncError}</p>
+                <button
+                  type="button"
+                  onClick={onRefresh}
+                  className="rounded-lg border border-violet-300/20 px-3 py-2 text-xs font-medium text-violet-200 transition hover:border-violet-300/40 hover:bg-violet-400/[0.08]"
+                >
+                  Check sync again
+                </button>
+              </div>
+            )}
+          </div>
+        ) : threads.length === 0 && initialSyncFailed ? (
+          <div
+            role="status"
+            className="flex h-64 flex-col items-center justify-center gap-3 px-6 text-center"
+          >
+            <Mail className="h-8 w-8 text-rose-300/70" />
+            <p className="text-sm font-medium text-slate-200">
+              Initial sync couldn&apos;t be completed
+            </p>
+            <p className="max-w-sm text-xs leading-relaxed text-slate-500">
+              Check your connection and try synchronizing your inbox again.
+            </p>
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="mt-1 rounded-lg border border-violet-300/20 px-3 py-2 text-xs font-medium text-violet-200 transition hover:border-violet-300/40 hover:bg-violet-400/[0.08]"
+            >
+              Retry sync
+            </button>
+          </div>
+        ) : isLoading ? (
           <div role="status" className="flex h-48 items-center justify-center text-sm text-slate-500">
             Loading emails…
           </div>

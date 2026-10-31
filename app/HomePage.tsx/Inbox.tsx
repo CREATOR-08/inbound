@@ -36,12 +36,20 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     emails: threads,
     setEmails: setThreads,
     isLoading,
+    isInitialSyncing,
+    initialSyncFailed,
     isRefreshing,
     error: apiError,
     emailError,
+    syncError,
     watchError,
     refresh: refreshEmails,
-  } = useGmailSync({ apiBaseUrl, enabled: true, getAccessToken: getGoogleToken });
+  } = useGmailSync({
+    apiBaseUrl,
+    accountKey: user.email,
+    enabled: true,
+    getAccessToken: getGoogleToken,
+  });
 
   const activeThread = threads.find((thread) => thread.id === selectedThreadId) || null;
   const {
@@ -158,8 +166,11 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             selectedEmailId={selectedThreadId}
             currentFilter={currentFilter}
             isLoading={isLoading}
+            isInitialSyncing={isInitialSyncing}
+            initialSyncFailed={initialSyncFailed}
             isRefreshing={isRefreshing}
             error={apiError}
+            syncError={syncError}
             hasLoadError={Boolean(emailError)}
             onSelectEmail={setSelectedThreadId}
             onRefresh={() => void refreshEmails()}

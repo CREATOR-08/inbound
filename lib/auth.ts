@@ -26,7 +26,7 @@ export const auth = betterAuth({
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      accessType: "offline", // Ensures Google returns a refresh token
+      accessType: "offline",
       prompt: "select_account consent",
       scope: [
         "openid",
@@ -36,6 +36,21 @@ export const auth = betterAuth({
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/calendar.events",
       ],
+    },
+  },
+
+  databaseHooks: {
+    account: {
+      update: {
+        before: async (account) => {
+          if (
+            "refreshToken" in account &&
+            (account.refreshToken == null || account.refreshToken.trim() === "")
+          ) {
+            return { data: { refreshToken: undefined } };
+          }
+        },
+      },
     },
   },
 });

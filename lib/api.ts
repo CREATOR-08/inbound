@@ -5,11 +5,14 @@ import type {
 } from "@/Types/email";
 
 export class ApiError extends Error {
+  readonly status: number;
+
   constructor(
     message: string,
-    readonly status: number,
+    status: number,
   ) {
     super(message);
+    this.status = status;
     this.name = "ApiError";
   }
 }
@@ -23,8 +26,17 @@ export interface WatchRegistrationResponse {
 }
 
 export interface InitialEmailSyncResponse {
-  status: "completed" | "already_completed";
+  status: InitialEmailSyncState;
+  imported_count?: number;
+  skipped_count?: number;
+  history_id?: string | null;
 }
+
+export type InitialEmailSyncState =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed";
 
 /**
  * Normalize the API base URL.
@@ -267,12 +279,64 @@ export async function fetchEmails(
 /**
  * POST /api/v1/emails/sync-initial
  *
- * Import the authenticated user's historical emails if the initial sync has
- * not already completed.
+ * Start the authenticated user's initial Gmail import. The 202 response
+ * describes the current state; completion is read from the status endpoint.
  */
+const parseInitialEmailSyncResponse = (
+  payload: unknown,
+): InitialEmailSyncResponse => {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload) ||
+    !("status" in payload) ||
+    (payload.status !== "pending" &&
+      payload.status !== "running" &&
+      payload.status !== "completed" &&
+      payload.status !== "failed")
+  ) {
+    throw new Error("The initial email sync response was invalid.");
+  }
+
+  const response = payload as Record<string, unknown>;
+  const result: InitialEmailSyncResponse = { status: payload.status };
+
+  for (const count of ["imported_count", "skipped_count"] as const) {
+    if (
+      count in response &&
+      (typeof response[count] !== "number" ||
+        !Number.isInteger(response[count]) ||
+        response[count] < 0)
+    ) {
+      throw new Error("The initial email sync response was invalid.");
+    }
+    if (typeof response[count] === "number") {
+      result[count] = response[count];
+    }
+  }
+
+  if (
+    "history_id" in response &&
+    response.history_id !== null &&
+    typeof response.history_id !== "string"
+  ) {
+    throw new Error("The initial email sync response was invalid.");
+  }
+
+  if ("history_id" in response) {
+    result.history_id =
+      typeof response.history_id === "string" || response.history_id === null
+        ? response.history_id
+        : null;
+  }
+
+  return result;
+};
+
 export async function syncInitialEmails(
   baseUrl: string,
   token: string,
+  signal?: AbortSignal,
 ): Promise<InitialEmailSyncResponse> {
   if (!token.trim()) {
     throw new Error(
@@ -282,24 +346,45 @@ export async function syncInitialEmails(
 
   const response = await request(baseUrl, "/api/v1/emails/sync-initial", {
     method: "POST",
+    signal,
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
 
   const payload: unknown = await response.json();
+  return parseInitialEmailSyncResponse(payload);
+}
 
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    !("status" in payload) ||
-    (payload.status !== "completed" &&
-      payload.status !== "already_completed")
-  ) {
-    throw new Error("The initial email sync response was invalid.");
+/**
+ * GET /api/v1/emails/sync-initial/status
+ *
+ * Read the authenticated user's persisted initial sync state.
+ */
+export async function getInitialEmailSyncStatus(
+  baseUrl: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<InitialEmailSyncResponse> {
+  if (!token.trim()) {
+    throw new Error(
+      "An active Google access token is required to check sync status.",
+    );
   }
 
-  return { status: payload.status };
+  const response = await request(
+    baseUrl,
+    "/api/v1/emails/sync-initial/status",
+    {
+      signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  const payload: unknown = await response.json();
+  return parseInitialEmailSyncResponse(payload);
 }
 
 /**
@@ -353,6 +438,7 @@ export async function fetchEmailBody(
 export async function registerWatch(
   baseUrl: string,
   token: string,
+  signal?: AbortSignal,
 ): Promise<WatchRegistrationResponse> {
   if (!token.trim()) {
     throw new Error("An active Google access token is required.");
@@ -360,6 +446,7 @@ export async function registerWatch(
 
   const response = await request(baseUrl, "/api/v1/emails/watch", {
     method: "POST",
+    signal,
     headers: {
       Authorization: `Bearer ${token}`,
     },
