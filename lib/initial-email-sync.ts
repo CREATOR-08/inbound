@@ -13,6 +13,7 @@ interface AccountState {
   snapshot: InitialEmailSyncSnapshot;
   listeners: Set<() => void>;
   initialization: Promise<void> | null;
+  completionRefreshes: Map<string, Promise<void>>;
 }
 
 const createAccountState = (): AccountState => ({
@@ -23,6 +24,7 @@ const createAccountState = (): AccountState => ({
   },
   listeners: new Set(),
   initialization: null,
+  completionRefreshes: new Map(),
 });
 
 export class InitialEmailSyncRegistry {
@@ -95,6 +97,20 @@ export class InitialEmailSyncRegistry {
     return initialization;
   }
 
+  runCompletionRefresh(
+    key: string,
+    completionKey: "initial" | "incremental",
+    refresh: () => Promise<void>,
+  ) {
+    const account = this.getAccount(key);
+    const existing = account.completionRefreshes.get(completionKey);
+    if (existing) return existing;
+
+    const request = Promise.resolve().then(refresh);
+    account.completionRefreshes.set(completionKey, request);
+    return request;
+  }
+
   getStatus(key: string) {
     return this.getSnapshot(key).response?.status ?? null;
   }
@@ -125,6 +141,7 @@ export type InitialSyncPollResult =
   | "aborted";
 
 export const INITIAL_EMAIL_SYNC_POLL_INTERVAL_MS = 4500;
+export const INITIAL_EMAIL_SYNC_RETRY_MAX_INTERVAL_MS = 60_000;
 
 export async function pollInitialEmailSync(
   readStatus: (signal: AbortSignal) => Promise<InitialEmailSyncResponse>,
@@ -134,18 +151,22 @@ export async function pollInitialEmailSync(
     intervalMs = INITIAL_EMAIL_SYNC_POLL_INTERVAL_MS,
     timeoutMs = 10 * 60 * 1000,
     requestTimeoutMs = 20 * 1000,
+    maxRetryIntervalMs = INITIAL_EMAIL_SYNC_RETRY_MAX_INTERVAL_MS,
   }: {
     intervalMs?: number;
     timeoutMs?: number;
     requestTimeoutMs?: number;
+    maxRetryIntervalMs?: number;
   } = {},
 ): Promise<InitialSyncPollResult> {
   const startedAt = Date.now();
+  let consecutiveFailures = 0;
 
   while (!signal.aborted) {
     const remainingMs = timeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) return "timeout";
     const pollStartedAt = Date.now();
+    let retryDelayMs = 0;
 
     const requestController = new AbortController();
     let requestTimedOut = false;
@@ -159,6 +180,7 @@ export async function pollInitialEmailSync(
     try {
       const response = await readStatus(requestController.signal);
       if (signal.aborted) return "aborted";
+      consecutiveFailures = 0;
       onStatus(response);
       if (response.status === "completed" || response.status === "already_completed") {
         return "completed";
@@ -177,15 +199,20 @@ export async function pollInitialEmailSync(
             error.status < 600);
         if (!retryable) throw error;
       }
+      consecutiveFailures += 1;
+      retryDelayMs = Math.min(
+        maxRetryIntervalMs,
+        Math.max(1, intervalMs) * 2 ** (consecutiveFailures - 1),
+      );
     } finally {
       clearTimeout(requestTimer);
       signal.removeEventListener("abort", abortRequest);
     }
 
-    await waitForNextPoll(
-      Math.max(0, intervalMs - (Date.now() - pollStartedAt)),
-      signal,
-    );
+    const delayMs = retryDelayMs > 0
+      ? retryDelayMs
+      : Math.max(0, intervalMs - (Date.now() - pollStartedAt));
+    await waitForNextPoll(delayMs, signal);
   }
 
   return "aborted";

@@ -262,7 +262,15 @@ export function useGmailSync({
         !wasInitialImportEligible
       ) {
         if (!token) token = await getAccessToken();
-        await refreshRef.current(false, token);
+        if (currentResponse.incremental_sync_status === "completed") {
+          await initialEmailSyncRegistry.runCompletionRefresh(
+            syncKey,
+            "incremental",
+            () => refreshRef.current(false, token),
+          );
+        } else {
+          await refreshRef.current(false, token);
+        }
 
         if (initialEmailSyncRegistry.markStartRequested(syncKey)) {
           setSyncError("");
@@ -277,7 +285,11 @@ export function useGmailSync({
       } else if (
         isInitialImportComplete(currentResponse, wasInitialImportEligible)
       ) {
-        await refreshRef.current(false, token);
+        await initialEmailSyncRegistry.runCompletionRefresh(
+          syncKey,
+          "initial",
+          () => refreshRef.current(false, token),
+        );
       } else if (
         wasInitialImportEligible &&
         currentResponse?.status === "failed"
@@ -323,10 +335,18 @@ export function useGmailSync({
       (response?.account_status === "existing" &&
         response.incremental_sync_status === "completed");
     if (hasCompletedSync) {
-      void refresh();
+      const completionKey = syncSnapshot.initialImportWasEligible
+        ? "initial"
+        : "incremental";
+      void initialEmailSyncRegistry.runCompletionRefresh(
+        syncKey,
+        completionKey,
+        () => refresh(),
+      );
     }
   }, [
     refresh,
+    syncKey,
     syncSnapshot.initialImportWasEligible,
     syncSnapshot.response,
   ]);
@@ -338,12 +358,23 @@ export function useGmailSync({
     ) {
       return refresh(true);
     }
+    if (
+      isInitialImportComplete(
+        syncSnapshot.response,
+        syncSnapshot.initialImportWasEligible,
+      ) ||
+      (syncSnapshot.response?.account_status === "existing" &&
+        syncSnapshot.response.incremental_sync_status === "completed")
+    ) {
+      setSyncError("");
+      return refresh(true);
+    }
     return initialize();
   }, [
     initialize,
     refresh,
     syncSnapshot.initialImportWasEligible,
-    syncSnapshot.response?.status,
+    syncSnapshot.response,
   ]);
 
   useEffect(() => {

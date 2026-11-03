@@ -156,6 +156,20 @@ test("shares an in-flight initialization between remounts", async () => {
   await Promise.all([first, second]);
 });
 
+test("runs one inbox refresh for completion reported by both callers", async () => {
+  const registry = new InitialEmailSyncRegistry();
+  let refreshes = 0;
+  const refresh = async () => {
+    refreshes += 1;
+  };
+
+  await Promise.all([
+    registry.runCompletionRefresh("account", "initial", refresh),
+    registry.runCompletionRefresh("account", "initial", refresh),
+  ]);
+  assert.equal(refreshes, 1);
+});
+
 test("polls sequentially until completion and stops on failure", async () => {
   const statuses = ["pending", "running", "completed"];
   const observed = [];
@@ -260,6 +274,83 @@ test("retries temporary network errors and cleans up the polling timer on abort"
   assert.equal(await polling, "aborted");
   await new Promise((resolve) => setTimeout(resolve, 70));
   assert.equal(reads, 1);
+});
+
+test("backs off after failed status requests and caps retry delay", async () => {
+  const starts = [];
+  let reads = 0;
+  const result = await pollInitialEmailSync(
+    async () => {
+      starts.push(Date.now());
+      reads += 1;
+      if (reads <= 3) throw new TypeError("temporary network issue");
+      return syncResponse("completed");
+    },
+    new AbortController().signal,
+    () => {},
+    {
+      intervalMs: 15,
+      maxRetryIntervalMs: 30,
+      timeoutMs: 1000,
+    },
+  );
+
+  assert.equal(result, "completed");
+  assert.equal(reads, 4);
+  const delays = starts.slice(1).map((startedAt, index) =>
+    startedAt - starts[index],
+  );
+  assert.ok(delays[0] >= 10, `first retry was too soon: ${delays[0]}ms`);
+  assert.ok(delays[1] >= 25, `second retry was too soon: ${delays[1]}ms`);
+  assert.ok(delays[2] >= 25, `capped retry was too soon: ${delays[2]}ms`);
+  assert.ok(delays.every((delay) => delay < 250));
+});
+
+test("backs off after request timeout without overlapping the next request", async () => {
+  let reads = 0;
+  let activeRequests = 0;
+  let maximumActiveRequests = 0;
+  let secondRequestStartedAt = 0;
+  const firstRequestStartedAt = Date.now();
+
+  const result = await pollInitialEmailSync(
+    (signal) => {
+      reads += 1;
+      activeRequests += 1;
+      maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+      if (reads === 2) secondRequestStartedAt = Date.now();
+      if (reads === 2) {
+        activeRequests -= 1;
+        return Promise.resolve(syncResponse("completed"));
+      }
+      return new Promise((resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => {
+            activeRequests -= 1;
+            reject(new DOMException("Request aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    },
+    new AbortController().signal,
+    () => {},
+    {
+      intervalMs: 20,
+      requestTimeoutMs: 10,
+      maxRetryIntervalMs: 40,
+      timeoutMs: 1000,
+    },
+  );
+
+  assert.equal(result, "completed");
+  assert.equal(reads, 2);
+  assert.equal(maximumActiveRequests, 1);
+  assert.ok(
+    secondRequestStartedAt - firstRequestStartedAt >= 25,
+    "the second request should wait for timeout and backoff",
+  );
 });
 
 test("returns a timeout for a sync that remains pending", async () => {
