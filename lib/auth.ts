@@ -1,6 +1,7 @@
 
 import { betterAuth } from "better-auth";
 import { Pool } from "pg";
+import { syncGoogleTokensToBackend } from "@/lib/google-token-sync";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -11,6 +12,42 @@ if (!connectionString) {
 const pool = new Pool({
   connectionString,
 });
+
+const syncGoogleAccount = async (
+  account: {
+    providerId: string;
+    userId: string;
+    accessToken?: string | null;
+    refreshToken?: string | null;
+    accessTokenExpiresAt?: Date | null;
+  },
+  endpointContext: {
+    context: {
+      internalAdapter: {
+        findUserById: (userId: string) => Promise<{ email: string } | null>;
+      };
+    };
+  } | null,
+) => {
+  if (account.providerId !== "google" || !account.accessToken?.trim()) return;
+  if (!endpointContext) {
+    throw new Error("Google account token sync requires an auth request context.");
+  }
+
+  const user = await endpointContext.context.internalAdapter.findUserById(
+    account.userId,
+  );
+  if (!user?.email) {
+    throw new Error("Google account token sync could not resolve the user.");
+  }
+
+  await syncGoogleTokensToBackend({
+    email: user.email,
+    accessToken: account.accessToken,
+    accessTokenExpiresAt: account.accessTokenExpiresAt,
+    refreshToken: account.refreshToken,
+  });
+};
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
@@ -50,6 +87,10 @@ export const auth = betterAuth({
             return { data: { refreshToken: undefined } };
           }
         },
+        after: syncGoogleAccount,
+      },
+      create: {
+        after: syncGoogleAccount,
       },
     },
   },

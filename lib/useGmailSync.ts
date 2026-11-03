@@ -7,20 +7,30 @@ import {
   getInitialEmailSyncStatus,
   registerWatch,
   syncInitialEmails,
+  type FetchEmailsOptions,
 } from "@/lib/api";
 import type { InitialEmailSyncState } from "@/lib/api";
 import {
   initialEmailSyncRegistry,
   pollInitialEmailSync,
 } from "@/lib/initial-email-sync";
-import type { EmailThread } from "@/Types/email";
+import type { EmailFilter, EmailThread } from "@/Types/email";
 
 interface UseGmailSyncOptions {
   apiBaseUrl: string;
   accountKey: string;
   enabled: boolean;
   getAccessToken: (forceRefresh?: boolean) => Promise<string>;
+  currentFilter?: EmailFilter;
 }
+
+const getFetchOptionsForFilter = (
+  filter?: EmailFilter,
+): FetchEmailsOptions | null => {
+  if (filter === "READ") return { is_read: true };
+  if (filter === "UNREAD") return { is_read: false };
+  return null;
+};
 
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
@@ -47,6 +57,7 @@ export function useGmailSync({
   accountKey,
   enabled,
   getAccessToken,
+  currentFilter,
 }: UseGmailSyncOptions) {
   const syncKey = `${apiBaseUrl}\u0000${accountKey}`;
   const [emails, setEmails] = useState<EmailThread[]>([]);
@@ -66,48 +77,85 @@ export function useGmailSync({
   const refreshInFlight = useRef(false);
   const authenticationFailed = useRef(false);
 
-  const refresh = useCallback(async (
-    allowAuthenticationRetry = false,
-    tokenOverride?: string,
-  ) => {
-    if (!initializationComplete.current || initializationInFlight.current) {
-      return;
-    }
-    if (refreshInFlight.current) return;
-    if (authenticationFailed.current && !allowAuthenticationRetry) return;
-    const forceTokenRefresh =
-      authenticationFailed.current && allowAuthenticationRetry;
-    if (allowAuthenticationRetry) authenticationFailed.current = false;
-    refreshInFlight.current = true;
-    setIsRefreshing(true);
-    try {
-      let token = tokenOverride;
-      if (!token) {
+  const refresh = useCallback(
+    async (
+      allowAuthenticationRetry = false,
+      tokenOverride?: string,
+      filterOverride?: EmailFilter,
+    ) => {
+      if (!initializationComplete.current || initializationInFlight.current) {
+        return;
+      }
+      if (refreshInFlight.current) return;
+      if (authenticationFailed.current && !allowAuthenticationRetry) return;
+      const forceTokenRefresh =
+        authenticationFailed.current && allowAuthenticationRetry;
+      if (allowAuthenticationRetry) authenticationFailed.current = false;
+      refreshInFlight.current = true;
+      setIsRefreshing(true);
+      try {
+        let token = tokenOverride;
+        if (!token) {
+          try {
+            token = await getAccessToken(forceTokenRefresh);
+          } catch (error: unknown) {
+            authenticationFailed.current = true;
+            throw error;
+          }
+        }
+
+        const activeFilter = filterOverride ?? currentFilter;
+        const fetchOptions = getFetchOptionsForFilter(activeFilter);
+
         try {
-          token = await getAccessToken(forceTokenRefresh);
+          const fetchedEmails = await fetchEmails(apiBaseUrl, token, fetchOptions);
+          setEmails((previousEmails) => {
+            if (!activeFilter || activeFilter === "ALL") {
+              return fetchedEmails;
+            }
+            if (activeFilter === "READ") {
+              const readMap = new Map(fetchedEmails.map((e) => [e.id, e]));
+              const existingUpdated = previousEmails.map((e) => {
+                if (readMap.has(e.id)) {
+                  return { ...e, ...readMap.get(e.id)!, is_read: true };
+                }
+                return { ...e, is_read: false };
+              });
+              const existingIds = new Set(previousEmails.map((e) => e.id));
+              const newEmails = fetchedEmails.filter((e) => !existingIds.has(e.id));
+              return [...existingUpdated, ...newEmails];
+            }
+            if (activeFilter === "UNREAD") {
+              const unreadMap = new Map(fetchedEmails.map((e) => [e.id, e]));
+              const existingUpdated = previousEmails.map((e) => {
+                if (unreadMap.has(e.id)) {
+                  return { ...e, ...unreadMap.get(e.id)!, is_read: false };
+                }
+                return { ...e, is_read: true };
+              });
+              const existingIds = new Set(previousEmails.map((e) => e.id));
+              const newEmails = fetchedEmails.filter((e) => !existingIds.has(e.id));
+              return [...existingUpdated, ...newEmails];
+            }
+            return fetchedEmails;
+          });
         } catch (error: unknown) {
-          authenticationFailed.current = true;
+          if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+            authenticationFailed.current = true;
+          }
           throw error;
         }
-      }
-
-      try {
-        setEmails(await fetchEmails(apiBaseUrl, token));
+        setEmailError("");
       } catch (error: unknown) {
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          authenticationFailed.current = true;
-        }
-        throw error;
+        setEmailError(getEmailErrorMessage(error));
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
+        refreshInFlight.current = false;
       }
-      setEmailError("");
-    } catch (error: unknown) {
-      setEmailError(getEmailErrorMessage(error));
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-      refreshInFlight.current = false;
-    }
-  }, [apiBaseUrl, getAccessToken]);
+    },
+    [apiBaseUrl, currentFilter, getAccessToken],
+  );
 
   const initialize = useCallback(async (
     allowRetry = false,
@@ -284,10 +332,19 @@ export function useGmailSync({
     authenticationFailed.current = false;
   }, [syncKey]);
 
+  const previousFilterRef = useRef<EmailFilter | undefined>(currentFilter);
+  useEffect(() => {
+    if (previousFilterRef.current === currentFilter) return;
+    previousFilterRef.current = currentFilter;
+    if (initializationComplete.current) {
+      void refresh(false, undefined, currentFilter);
+    }
+  }, [currentFilter, refresh]);
+
   const refreshManually = useCallback(() => {
     if (!initializationComplete.current) return initialize(true);
-    return refresh(true);
-  }, [initialize, refresh]);
+    return refresh(true, undefined, currentFilter);
+  }, [currentFilter, initialize, refresh]);
 
   useEffect(() => {
     if (!enabled) return;

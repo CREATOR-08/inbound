@@ -208,8 +208,18 @@ const getEmailThreadValidationError = (
     return "is_archived must be a boolean";
   }
 
+  if ("is_read" in value && typeof value.is_read !== "boolean") {
+    return "is_read must be a boolean";
+  }
+
   return null;
 };
+
+export interface FetchEmailsOptions {
+  is_read?: boolean;
+  unread?: boolean;
+  status?: "read" | "unread" | "all";
+}
 
 /**
  * GET /api/v1/emails
@@ -219,6 +229,7 @@ const getEmailThreadValidationError = (
 export async function fetchEmails(
   baseUrl: string,
   token: string,
+  options?: FetchEmailsOptions | null,
 ): Promise<EmailThread[]> {
   if (typeof token !== "string" || !token.trim()) {
     throw new Error(
@@ -226,7 +237,19 @@ export async function fetchEmails(
     );
   }
 
-  const response = await request(baseUrl, "/api/v1/emails", {
+  const searchParams = new URLSearchParams();
+  if (options?.is_read !== undefined) {
+    searchParams.set("is_read", String(options.is_read));
+  } else if (options?.unread !== undefined) {
+    searchParams.set("unread", String(options.unread));
+  } else if (options?.status && options.status !== "all") {
+    searchParams.set("status", options.status);
+  }
+
+  const query = searchParams.toString();
+  const path = query ? `/api/v1/emails?${query}` : "/api/v1/emails";
+
+  const response = await request(baseUrl, path, {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -584,3 +607,62 @@ export function sendReply(
     }),
   });
 }
+
+export interface UpdateEmailReadStatusResponse {
+  status: string;
+  email_id?: string;
+  id?: string;
+  is_read: boolean;
+}
+
+/**
+ * Update the read status of an email.
+ * POST /api/v1/emails/{email_id}/read or /unread
+ */
+export async function updateEmailReadStatus(
+  baseUrl: string,
+  token: string,
+  emailId: string,
+  isRead: boolean,
+): Promise<UpdateEmailReadStatusResponse> {
+  if (!token.trim()) {
+    throw new Error("An active Google access token is required.");
+  }
+
+  const endpoint = isRead
+    ? `/api/v1/emails/${encodeURIComponent(emailId)}/read`
+    : `/api/v1/emails/${encodeURIComponent(emailId)}/unread`;
+
+  const response = await request(baseUrl, endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ is_read: isRead }),
+  });
+
+  const payload: unknown = await response.json();
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("is_read" in payload) ||
+    typeof (payload as { is_read: unknown }).is_read !== "boolean"
+  ) {
+    throw new Error("The read status update response was invalid.");
+  }
+
+  return payload as UpdateEmailReadStatusResponse;
+}
+
+export const markEmailRead = (
+  baseUrl: string,
+  token: string,
+  emailId: string,
+) => updateEmailReadStatus(baseUrl, token, emailId, true);
+
+export const markEmailUnread = (
+  baseUrl: string,
+  token: string,
+  emailId: string,
+) => updateEmailReadStatus(baseUrl, token, emailId, false);

@@ -6,6 +6,9 @@ import {
   Inbox,
   Layers3,
   LogOut,
+  Mail,
+  MailCheck,
+  RefreshCw,
   ShieldAlert,
   Sparkles,
   Star,
@@ -18,6 +21,7 @@ interface SidebarProps {
   currentFilter: EmailFilter;
   counts: Record<EmailFilter, number>;
   onSelectFilter: (filter: EmailFilter) => void;
+  onReconnectGoogle: () => void;
   onSignOut: () => void;
   signOutError?: string;
 }
@@ -28,6 +32,8 @@ const navItems: {
   icon: typeof Inbox;
 }[] = [
   { id: "ALL", label: "All", icon: Inbox },
+  { id: "UNREAD", label: "Unread", icon: Mail },
+  { id: "READ", label: "Read", icon: MailCheck },
   { id: "TRIAGED", label: "Triaged", icon: Layers3 },
   { id: "URGENT", label: "Urgent", icon: ShieldAlert },
   { id: "HIGH_PRIORITY", label: "High Priority", icon: Star },
@@ -40,6 +46,7 @@ export default function Sidebar({
   currentFilter,
   counts,
   onSelectFilter,
+  onReconnectGoogle,
   onSignOut,
   signOutError,
 }: SidebarProps) {
@@ -104,6 +111,15 @@ export default function Sidebar({
             <p className="truncate text-xs font-medium text-slate-200">{user.name || "Account"}</p>
             <p className="truncate text-[10px] text-slate-500">{user.email}</p>
           </div>
+          <button
+            type="button"
+            onClick={onReconnectGoogle}
+            aria-label="Reconnect Google"
+            title="Reconnect Google"
+            className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-violet-300"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
           <button
             type="button"
             onClick={onSignOut}

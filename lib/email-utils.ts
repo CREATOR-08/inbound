@@ -69,6 +69,10 @@ export const matchesEmailFilter = (
   switch (filter) {
     case "ALL":
       return !archived;
+    case "UNREAD":
+      return !archived && !email.is_read;
+    case "READ":
+      return !archived && email.is_read === true;
     case "TRIAGED":
       return !archived && Boolean(email.category);
     case "URGENT":

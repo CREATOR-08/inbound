@@ -5,6 +5,7 @@ import {
   draftReply as requestReplyDraft,
   extractSchedule,
   sendReply,
+  updateEmailReadStatus,
 } from "@/lib/api";
 import {
   isDraftStreamEvent,
@@ -73,8 +74,8 @@ export function useEmailActions({
         if (email.body === undefined && email.body_html === undefined) {
           await loadEmailBody(email.id);
         }
-        const token=await getAccessToken();
-        const response = await requestReplyDraft(apiBaseUrl,token, email.id);
+        const token = await getAccessToken();
+        const response = await requestReplyDraft(apiBaseUrl, token, email.id);
         if (!response.body) throw new Error("The draft response did not include a stream.");
 
         const reader = response.body.getReader();
@@ -126,7 +127,7 @@ export function useEmailActions({
         setDraftingEmailId(null);
       }
     },
-    [apiBaseUrl, loadEmailBody, notify, replyDraft],
+    [apiBaseUrl, getAccessToken, loadEmailBody, notify, replyDraft],
   );
 
   const sendCurrentReply = useCallback(async () => {
@@ -154,58 +155,58 @@ export function useEmailActions({
     }
   }, [notify, replyDraft]);
 
-const extractMeeting = useCallback(
-  async (email: EmailThread) => {
-    setSchedulingEmailId(email.id);
+  const extractMeeting = useCallback(
+    async (email: EmailThread) => {
+      setSchedulingEmailId(email.id);
 
-    try {
-      const token = await getAccessToken();
+      try {
+        const token = await getAccessToken();
 
-      const response = await extractSchedule(
-        apiBaseUrl,
-        token,
-        email.id,
-      );
-
-      const result: unknown = await response.json();
-
-      if (!isScheduleExtractionResponse(result)) {
-        throw new Error(
-          "The schedule response did not include a calendar proposal.",
+        const response = await extractSchedule(
+          apiBaseUrl,
+          token,
+          email.id,
         );
-      }
 
-      const event = result.calendar_event;
-      const needsManualSchedule =
-        event.confidence === 0 &&
-        event.start_time === "" &&
-        event.end_time === "";
+        const result: unknown = await response.json();
 
-      if (
-        !needsManualSchedule &&
-        (!Number.isFinite(new Date(event.start_time).getTime()) ||
-          !Number.isFinite(new Date(event.end_time).getTime()))
-      ) {
-        throw new Error(
-          "The calendar proposal contained an invalid date or time.",
+        if (!isScheduleExtractionResponse(result)) {
+          throw new Error(
+            "The schedule response did not include a calendar proposal.",
+          );
+        }
+
+        const event = result.calendar_event;
+        const needsManualSchedule =
+          event.confidence === 0 &&
+          event.start_time === "" &&
+          event.end_time === "";
+
+        if (
+          !needsManualSchedule &&
+          (!Number.isFinite(new Date(event.start_time).getTime()) ||
+            !Number.isFinite(new Date(event.end_time).getTime()))
+        ) {
+          throw new Error(
+            "The calendar proposal contained an invalid date or time.",
+          );
+        }
+
+        setScheduleProposal({
+          ...event,
+          email_id: email.id,
+        });
+      } catch (error: unknown) {
+        notify(
+          getErrorMessage(error, "Unable to extract a meeting."),
+          "error",
         );
+      } finally {
+        setSchedulingEmailId(null);
       }
-
-      setScheduleProposal({
-        ...event,
-        email_id: email.id,
-      });
-    } catch (error: unknown) {
-      notify(
-        getErrorMessage(error, "Unable to extract a meeting."),
-        "error",
-      );
-    } finally {
-      setSchedulingEmailId(null);
-    }
-  },
-  [apiBaseUrl, getAccessToken, notify],
-);
+    },
+    [apiBaseUrl, getAccessToken, notify],
+  );
 
   const archiveEmail = useCallback(
     (emailId: string) => {
@@ -225,15 +226,84 @@ const extractMeeting = useCallback(
     [notify, setEmails],
   );
 
-  const toggleEmailRead = useCallback(
-    (emailId: string) => {
+  const markEmailAsRead = useCallback(
+    async (emailId: string) => {
       setEmails((current) =>
         current.map((email) =>
-          email.id === emailId ? { ...email, is_read: !email.is_read } : email,
+          email.id === emailId ? { ...email, is_read: true } : email,
         ),
       );
+
+      try {
+        const token = await getAccessToken();
+        await updateEmailReadStatus(apiBaseUrl, token, emailId, true);
+      } catch (error: unknown) {
+        setEmails((current) =>
+          current.map((email) =>
+            email.id === emailId ? { ...email, is_read: false } : email,
+          ),
+        );
+        notify(getErrorMessage(error, "Unable to mark email as read."), "error");
+      }
     },
-    [setEmails],
+    [apiBaseUrl, getAccessToken, notify, setEmails],
+  );
+
+  const markEmailAsUnread = useCallback(
+    async (emailId: string) => {
+      setEmails((current) =>
+        current.map((email) =>
+          email.id === emailId ? { ...email, is_read: false } : email,
+        ),
+      );
+
+      try {
+        const token = await getAccessToken();
+        await updateEmailReadStatus(apiBaseUrl, token, emailId, false);
+        notify("Marked as unread.", "success");
+      } catch (error: unknown) {
+        setEmails((current) =>
+          current.map((email) =>
+            email.id === emailId ? { ...email, is_read: true } : email,
+          ),
+        );
+        notify(getErrorMessage(error, "Unable to mark email as unread."), "error");
+      }
+    },
+    [apiBaseUrl, getAccessToken, notify, setEmails],
+  );
+
+  const toggleEmailRead = useCallback(
+    async (emailId: string) => {
+      let targetRead = false;
+      setEmails((current) => {
+        const existing = current.find((email) => email.id === emailId);
+        targetRead = existing ? !existing.is_read : false;
+        return current.map((email) =>
+          email.id === emailId ? { ...email, is_read: targetRead } : email,
+        );
+      });
+
+      try {
+        const token = await getAccessToken();
+        await updateEmailReadStatus(apiBaseUrl, token, emailId, targetRead);
+        notify(targetRead ? "Marked as read." : "Marked as unread.", "success");
+      } catch (error: unknown) {
+        setEmails((current) =>
+          current.map((email) =>
+            email.id === emailId ? { ...email, is_read: !targetRead } : email,
+          ),
+        );
+        notify(
+          getErrorMessage(
+            error,
+            targetRead ? "Unable to mark as read." : "Unable to mark as unread.",
+          ),
+          "error",
+        );
+      }
+    },
+    [apiBaseUrl, getAccessToken, notify, setEmails],
   );
 
   const confirmScheduledEmail = useCallback(
@@ -285,6 +355,8 @@ const extractMeeting = useCallback(
     confirmScheduledEmail,
     archiveEmail,
     deleteEmail,
+    markEmailAsRead,
+    markEmailAsUnread,
     toggleEmailRead,
   };
 }

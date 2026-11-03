@@ -1,6 +1,6 @@
 "use client";
 import AssistantPanel from "@/components/assistant/AssistantPannel";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { EmailFilter } from "@/Types/email";
 import EmailDetailView from "@/components/HomePage.tsx/EmailDetailView";
 import EmailListView from "@/components/HomePage.tsx/EmailListView";
@@ -16,6 +16,7 @@ import { useEmailActions } from "@/hooks/useEmailActions";
 import { useEmailFilters } from "@/hooks/useEmailFilters";
 import { useGoogleAccessToken } from "@/hooks/useGoogleAccessToken";
 import { useToast } from "@/hooks/useToast";
+import { authClient } from "@/lib/auth-client";
 
 interface InboxProps {
   user: { name: string; email: string };
@@ -27,10 +28,33 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   const [selectedThreadId, setSelectedThreadId] = useState("");
   const [currentFilter, setCurrentFilter] = useState<EmailFilter>("ALL");
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [reconnectError, setReconnectError] = useState("");
 
   const apiBaseUrl = getApiBaseUrl();
   const { getAccessToken: getGoogleToken, invalidateAccessToken } = useGoogleAccessToken();
   const { toast, notify } = useToast();
+
+  const reconnectGoogle = useCallback(async () => {
+    setReconnectError("");
+    try {
+      const { error } = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+        errorCallbackURL: "/",
+      });
+      if (error) {
+        setReconnectError(
+          error.message ?? "Unable to reconnect Google. Please try again.",
+        );
+      }
+    } catch (error) {
+      setReconnectError(
+        error instanceof Error
+          ? error.message
+          : "Unable to reconnect Google. Please try again.",
+      );
+    }
+  }, []);
 
   const {
     emails: threads,
@@ -49,6 +73,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     accountKey: user.email,
     enabled: true,
     getAccessToken: getGoogleToken,
+    currentFilter,
   });
 
   const activeThread = threads.find((thread) => thread.id === selectedThreadId) || null;
@@ -78,6 +103,35 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   });
   const activeRead = activeThread?.is_read === true;
 
+  const lastAutoReadId = useRef<string | null>(null);
+
+  const openEmail = useCallback(
+    (emailId: string) => {
+      setSelectedThreadId(emailId);
+      const target = threads.find((t) => t.id === emailId);
+      if (target && !target.is_read) {
+        lastAutoReadId.current = emailId;
+        void emailActions.markEmailAsRead(emailId);
+      }
+    },
+    [threads, emailActions],
+  );
+
+  useEffect(() => {
+    if (!selectedThreadId) {
+      lastAutoReadId.current = null;
+      return;
+    }
+    if (lastAutoReadId.current === selectedThreadId) {
+      return;
+    }
+    lastAutoReadId.current = selectedThreadId;
+    const thread = threads.find((t) => t.id === selectedThreadId);
+    if (thread && !thread.is_read) {
+      void emailActions.markEmailAsRead(selectedThreadId);
+    }
+  }, [selectedThreadId, threads, emailActions]);
+
   const archiveSelectedEmail = () => {
     if (!activeThread) return;
     emailActions.archiveEmail(activeThread.id);
@@ -91,7 +145,9 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   };
 
   const toggleSelectedEmailRead = () => {
-    if (activeThread) emailActions.toggleEmailRead(activeThread.id);
+    if (activeThread) {
+      void emailActions.toggleEmailRead(activeThread.id);
+    }
   };
 
   const openAssistantResult = (result: AssistantEmailSummary) => {
@@ -106,12 +162,12 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             ...current,
           ],
     );
-    setSelectedThreadId(result.id);
+    openEmail(result.id);
   };
 
   const openAssistantActionEmail = (emailId: string) => {
     if (!threads.some((thread) => thread.id === emailId)) return;
-    setSelectedThreadId(emailId);
+    openEmail(emailId);
   };
 
   return (
@@ -133,8 +189,9 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             setCurrentFilter(filter);
             setSelectedThreadId("");
           }}
+          onReconnectGoogle={() => void reconnectGoogle()}
           onSignOut={onSignOut}
-          signOutError={signOutError}
+          signOutError={signOutError || reconnectError}
         />
         {activeThread ? (
           <EmailDetailView
@@ -172,8 +229,13 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             error={apiError}
             syncError={syncError}
             hasLoadError={Boolean(emailError)}
-            onSelectEmail={setSelectedThreadId}
+            onSelectEmail={openEmail}
             onRefresh={() => void refreshEmails()}
+            onSelectFilter={(filter) => {
+              setCurrentFilter(filter);
+              setSelectedThreadId("");
+            }}
+            onToggleRead={(emailId) => void emailActions.toggleEmailRead(emailId)}
           />
         )}
       </main>

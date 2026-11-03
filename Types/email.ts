@@ -11,6 +11,8 @@
 // }
 export type EmailFilter =
   | "ALL"
+  | "UNREAD"
+  | "READ"
   | "TRIAGED"
   | "URGENT"
   | "HIGH_PRIORITY"

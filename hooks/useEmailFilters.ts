@@ -27,6 +27,12 @@ export function useEmailFilters({
   const counts = useMemo<Record<EmailFilter, number>>(
     () => ({
       ALL: emails.filter((email) => !isArchivedEmail(email)).length,
+      UNREAD: emails.filter(
+        (email) => !isArchivedEmail(email) && !email.is_read,
+      ).length,
+      READ: emails.filter(
+        (email) => !isArchivedEmail(email) && email.is_read === true,
+      ).length,
       TRIAGED: emails.filter(
         (email) => !isArchivedEmail(email) && Boolean(email.category),
       ).length,
