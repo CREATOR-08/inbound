@@ -27,15 +27,21 @@ export interface WatchRegistrationResponse {
 
 export interface InitialEmailSyncResponse {
   status: InitialEmailSyncState;
+  account_status: "new" | "existing";
+  sync_mode: "initial" | "incremental";
+  stored_email_count: number;
+  incremental_sync_status: "running" | "completed" | "failed" | null;
   imported_count?: number;
   skipped_count?: number;
   history_id?: string | null;
 }
 
 export type InitialEmailSyncState =
+  | "not_started"
   | "pending"
   | "running"
   | "completed"
+  | "already_completed"
   | "failed";
 
 /**
@@ -313,16 +319,39 @@ const parseInitialEmailSyncResponse = (
     payload === null ||
     Array.isArray(payload) ||
     !("status" in payload) ||
-    (payload.status !== "pending" &&
+    (payload.status !== "not_started" &&
+      payload.status !== "pending" &&
       payload.status !== "running" &&
       payload.status !== "completed" &&
+      payload.status !== "already_completed" &&
       payload.status !== "failed")
   ) {
     throw new Error("The initial email sync response was invalid.");
   }
 
   const response = payload as Record<string, unknown>;
-  const result: InitialEmailSyncResponse = { status: payload.status };
+  if (
+    (response.account_status !== "new" &&
+      response.account_status !== "existing") ||
+    (response.sync_mode !== "initial" &&
+      response.sync_mode !== "incremental") ||
+    typeof response.stored_email_count !== "number" ||
+    !Number.isInteger(response.stored_email_count) ||
+    response.stored_email_count < 0 ||
+    (response.incremental_sync_status !== null &&
+      response.incremental_sync_status !== "running" &&
+      response.incremental_sync_status !== "completed" &&
+      response.incremental_sync_status !== "failed")
+  ) {
+    throw new Error("The initial email sync response was invalid.");
+  }
+  const result: InitialEmailSyncResponse = {
+    status: payload.status,
+    account_status: response.account_status,
+    sync_mode: response.sync_mode,
+    stored_email_count: response.stored_email_count,
+    incremental_sync_status: response.incremental_sync_status,
+  };
 
   for (const count of ["imported_count", "skipped_count"] as const) {
     if (

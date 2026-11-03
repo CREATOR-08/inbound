@@ -66,7 +66,6 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     error: apiError,
     emailError,
     syncError,
-    watchError,
     refresh: refreshEmails,
   } = useGmailSync({
     apiBaseUrl,
@@ -173,12 +172,12 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
   return (
     <>
       <main className="relative flex h-screen w-screen overflow-hidden bg-[#0b0c12] font-sans text-slate-100">
-        {activeThread && watchError && (
+        {activeThread && (syncError || emailError) && (
           <div
             role="alert"
             className="absolute right-4 top-3 z-50 max-w-lg rounded-xl border border-rose-500/20 bg-[#1c1014] px-4 py-3 text-sm text-rose-200 shadow-xl"
           >
-            {watchError}
+            {syncError || emailError}
           </div>
         )}
         <Sidebar
@@ -227,7 +226,6 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
             initialSyncFailed={initialSyncFailed}
             isRefreshing={isRefreshing}
             error={apiError}
-            syncError={syncError}
             hasLoadError={Boolean(emailError)}
             onSelectEmail={openEmail}
             onRefresh={() => void refreshEmails()}

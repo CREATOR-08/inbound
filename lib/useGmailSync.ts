@@ -1,15 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ApiError,
   fetchEmails,
   getInitialEmailSyncStatus,
-  registerWatch,
   syncInitialEmails,
   type FetchEmailsOptions,
+  type InitialEmailSyncResponse,
 } from "@/lib/api";
-import type { InitialEmailSyncState } from "@/lib/api";
 import {
   initialEmailSyncRegistry,
   pollInitialEmailSync,
@@ -52,6 +51,20 @@ const getInitialSyncErrorMessage = (error: unknown) => {
   return getErrorMessage(error, "Unable to synchronize your Gmail inbox.");
 };
 
+const isInitialImportInProgress = (response: InitialEmailSyncResponse | null) =>
+  response?.account_status === "new" &&
+  response.sync_mode === "initial" &&
+  (response.status === "not_started" ||
+    response.status === "pending" ||
+    response.status === "running");
+
+const isInitialImportComplete = (
+  response: InitialEmailSyncResponse | null,
+  wasEligible: boolean,
+) =>
+  wasEligible &&
+  (response?.status === "completed" || response?.status === "already_completed");
+
 export function useGmailSync({
   apiBaseUrl,
   accountKey,
@@ -60,22 +73,21 @@ export function useGmailSync({
   currentFilter,
 }: UseGmailSyncOptions) {
   const syncKey = `${apiBaseUrl}\u0000${accountKey}`;
+  const syncSnapshot = useSyncExternalStore(
+    (listener) => initialEmailSyncRegistry.subscribe(syncKey, listener),
+    () => initialEmailSyncRegistry.getSnapshot(syncKey),
+    () => initialEmailSyncRegistry.getSnapshot(syncKey),
+  );
   const [emails, setEmails] = useState<EmailThread[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [syncError, setSyncError] = useState("");
-  const [syncStatus, setSyncStatus] = useState<InitialEmailSyncState | null>(
-    () => initialEmailSyncRegistry.getStatus(syncKey),
-  );
-  const [watchError, setWatchError] = useState("");
-  const watchAttempted = useRef(false);
-  const initializationAttempted = useRef(false);
-  const initializationInFlight = useRef(false);
-  const initializationComplete = useRef(false);
-  const initializationController = useRef<AbortController | null>(null);
   const refreshInFlight = useRef(false);
   const authenticationFailed = useRef(false);
+  const refreshRef = useRef<
+    (allowAuthenticationRetry?: boolean, tokenOverride?: string) => Promise<void>
+  >(async () => {});
 
   const refresh = useCallback(
     async (
@@ -83,9 +95,6 @@ export function useGmailSync({
       tokenOverride?: string,
       filterOverride?: EmailFilter,
     ) => {
-      if (!initializationComplete.current || initializationInFlight.current) {
-        return;
-      }
       if (refreshInFlight.current) return;
       if (authenticationFailed.current && !allowAuthenticationRetry) return;
       const forceTokenRefresh =
@@ -114,27 +123,27 @@ export function useGmailSync({
               return fetchedEmails;
             }
             if (activeFilter === "READ") {
-              const readMap = new Map(fetchedEmails.map((e) => [e.id, e]));
-              const existingUpdated = previousEmails.map((e) => {
-                if (readMap.has(e.id)) {
-                  return { ...e, ...readMap.get(e.id)!, is_read: true };
+              const readMap = new Map(fetchedEmails.map((email) => [email.id, email]));
+              const existingUpdated = previousEmails.map((email) => {
+                if (readMap.has(email.id)) {
+                  return { ...email, ...readMap.get(email.id)!, is_read: true };
                 }
-                return { ...e, is_read: false };
+                return { ...email, is_read: false };
               });
-              const existingIds = new Set(previousEmails.map((e) => e.id));
-              const newEmails = fetchedEmails.filter((e) => !existingIds.has(e.id));
+              const existingIds = new Set(previousEmails.map((email) => email.id));
+              const newEmails = fetchedEmails.filter((email) => !existingIds.has(email.id));
               return [...existingUpdated, ...newEmails];
             }
             if (activeFilter === "UNREAD") {
-              const unreadMap = new Map(fetchedEmails.map((e) => [e.id, e]));
-              const existingUpdated = previousEmails.map((e) => {
-                if (unreadMap.has(e.id)) {
-                  return { ...e, ...unreadMap.get(e.id)!, is_read: false };
+              const unreadMap = new Map(fetchedEmails.map((email) => [email.id, email]));
+              const existingUpdated = previousEmails.map((email) => {
+                if (unreadMap.has(email.id)) {
+                  return { ...email, ...unreadMap.get(email.id)!, is_read: false };
                 }
-                return { ...e, is_read: true };
+                return { ...email, is_read: true };
               });
-              const existingIds = new Set(previousEmails.map((e) => e.id));
-              const newEmails = fetchedEmails.filter((e) => !existingIds.has(e.id));
+              const existingIds = new Set(previousEmails.map((email) => email.id));
+              const newEmails = fetchedEmails.filter((email) => !existingIds.has(email.id));
               return [...existingUpdated, ...newEmails];
             }
             return fetchedEmails;
@@ -156,213 +165,186 @@ export function useGmailSync({
     },
     [apiBaseUrl, currentFilter, getAccessToken],
   );
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
-  const initialize = useCallback(async (
-    allowRetry = false,
-    effectController?: AbortController,
-  ) => {
-    if (initializationInFlight.current || effectController?.signal.aborted) return;
-    if (initializationAttempted.current && !allowRetry) return;
-
-    initializationAttempted.current = true;
-    initializationInFlight.current = true;
-    const controller = effectController ?? new AbortController();
-    const signal = controller.signal;
-    initializationController.current = controller;
-    setIsRefreshing(true);
-    setSyncError("");
-    setEmailError("");
+  const initialize = useCallback(async () => {
     let token = "";
-    let syncCompleted = false;
-
-    const updateSyncStatus = (status: InitialEmailSyncState) => {
-      initialEmailSyncRegistry.setStatus(syncKey, status);
-      setSyncStatus(status);
-    };
-
     try {
-      const forceTokenRefresh = authenticationFailed.current && allowRetry;
-      if (allowRetry) authenticationFailed.current = false;
-      try {
-        token = await getAccessToken(forceTokenRefresh);
-      } catch (error: unknown) {
-        authenticationFailed.current = true;
-        throw error;
-      }
-      if (signal.aborted) return;
+      await initialEmailSyncRegistry.runInitialization(syncKey, async () => {
+        setSyncError("");
+        setEmailError("");
 
-      if (!watchAttempted.current) {
-        watchAttempted.current = true;
         try {
-          await registerWatch(apiBaseUrl, token, signal);
-          setWatchError("");
+          token = await getAccessToken(authenticationFailed.current);
+          authenticationFailed.current = false;
         } catch (error: unknown) {
-          if (signal.aborted) {
-            watchAttempted.current = false;
-            return;
-          }
-          if (error instanceof ApiError && error.status === 401) {
-            setWatchError(
-              "Your Google access token has expired. Please sign out and sign in again.",
-            );
-          } else {
-            setWatchError(
-              getErrorMessage(error, "Unable to enable real-time Gmail updates."),
-            );
-          }
+          authenticationFailed.current = true;
+          throw error;
         }
-      }
 
-      const currentStatus = initialEmailSyncRegistry.getStatus(syncKey);
-      setSyncStatus(currentStatus);
-      if (initialEmailSyncRegistry.getStatus(syncKey) === "completed") {
-        syncCompleted = true;
-      } else if (
-        initialEmailSyncRegistry.getStatus(syncKey) === "failed" &&
-        !allowRetry
-      ) {
-        throw new Error(
-          "Initial Gmail synchronization failed. Retry to start it again.",
+        const statusResponse = await getInitialEmailSyncStatus(
+          apiBaseUrl,
+          token,
         );
-      } else {
-        if (
-          allowRetry &&
-          initialEmailSyncRegistry.resetFailedSync(syncKey)
-        ) {
-          setSyncStatus(null);
-        }
+        initialEmailSyncRegistry.setResponse(syncKey, statusResponse);
 
-        if (initialEmailSyncRegistry.markStartRequested(syncKey)) {
-          updateSyncStatus("pending");
-          try {
-            const startResponse = await syncInitialEmails(
-              apiBaseUrl,
-              token,
-              signal,
-            );
-            if (signal.aborted) return;
-            updateSyncStatus(startResponse.status);
-            if (startResponse.status === "completed") {
-              syncCompleted = true;
-            }
-          } catch (error: unknown) {
-            if (signal.aborted) return;
-            initialEmailSyncRegistry.clearStartRequest(syncKey);
-            updateSyncStatus("failed");
-            if (
-              error instanceof ApiError &&
-              (error.status === 401 || error.status === 403)
-            ) {
-              authenticationFailed.current = true;
-            }
-            throw error;
+        if (statusResponse.account_status === "new") {
+          if (statusResponse.sync_mode !== "initial") {
+            throw new Error("The Gmail sync response had an inconsistent account mode.");
           }
-        }
 
-        if (!syncCompleted) {
-          const pollResult = await pollInitialEmailSync(
-            async (requestSignal) => {
-              const statusResponse = await getInitialEmailSyncStatus(
+          if (statusResponse.status === "not_started") {
+            if (!initialEmailSyncRegistry.markStartRequested(syncKey)) {
+              initialEmailSyncRegistry.setStatus(syncKey, "failed");
+              return;
+            }
+            initialEmailSyncRegistry.setStatus(syncKey, "pending");
+            try {
+              const startResponse = await syncInitialEmails(
                 apiBaseUrl,
                 token,
-                requestSignal,
               );
-              return statusResponse.status;
-            },
-            signal,
-            updateSyncStatus,
-          );
-          if (pollResult === "completed") {
-            syncCompleted = true;
-          } else if (pollResult === "failed") {
-            throw new Error(
-              "Gmail could not finish the initial synchronization. Retry to try again.",
-            );
-          } else if (pollResult === "timeout") {
-            setSyncError(
-              "Initial Gmail synchronization is taking longer than expected. It will continue in the background.",
-            );
+              initialEmailSyncRegistry.setResponse(syncKey, startResponse);
+            } catch (error: unknown) {
+              initialEmailSyncRegistry.setStatus(syncKey, "failed");
+              throw error;
+            }
+          } else {
+            initialEmailSyncRegistry.markStartRequested(syncKey);
           }
-        }
-      }
 
-      if (syncCompleted) {
-        initializationComplete.current = true;
-        setEmailError("");
-        setSyncError("");
+          const currentResponse =
+            initialEmailSyncRegistry.getSnapshot(syncKey).response;
+          if (
+            currentResponse?.status === "pending" ||
+            currentResponse?.status === "running"
+          ) {
+            const pollResult = await pollInitialEmailSync(
+              async (requestSignal) => {
+                const response = await getInitialEmailSyncStatus(
+                  apiBaseUrl,
+                  token,
+                  requestSignal,
+                );
+                initialEmailSyncRegistry.setResponse(syncKey, response);
+                return response;
+              },
+              new AbortController().signal,
+              (response) => initialEmailSyncRegistry.setResponse(syncKey, response),
+            );
+            if (pollResult === "failed") {
+              throw new Error(
+                "Gmail could not finish the initial synchronization. It will not be restarted automatically.",
+              );
+            }
+            if (pollResult === "timeout") {
+              setSyncError(
+                "Initial Gmail synchronization is taking longer than expected. It will continue in the background.",
+              );
+            }
+          }
+          return;
+        }
+
+        if (statusResponse.sync_mode !== "incremental") {
+          throw new Error("The Gmail sync response had an inconsistent account mode.");
+        }
+      });
+
+      const currentResponse =
+        initialEmailSyncRegistry.getSnapshot(syncKey).response;
+      const wasInitialImportEligible =
+        initialEmailSyncRegistry.getSnapshot(syncKey).initialImportWasEligible;
+      if (
+        currentResponse?.account_status === "existing" &&
+        !wasInitialImportEligible
+      ) {
+        if (!token) token = await getAccessToken();
+        await refreshRef.current(false, token);
+
+        if (initialEmailSyncRegistry.markStartRequested(syncKey)) {
+          setSyncError("");
+          void syncInitialEmails(apiBaseUrl, token)
+            .then((response) => {
+              initialEmailSyncRegistry.setResponse(syncKey, response);
+            })
+            .catch((error: unknown) => {
+              setSyncError(getInitialSyncErrorMessage(error));
+            });
+        }
+      } else if (
+        isInitialImportComplete(currentResponse, wasInitialImportEligible)
+      ) {
+        await refreshRef.current(false, token);
+      } else if (
+        wasInitialImportEligible &&
+        currentResponse?.status === "failed"
+      ) {
+        setIsLoading(false);
+      } else if (
+        wasInitialImportEligible &&
+        isInitialImportInProgress(currentResponse)
+      ) {
+        setIsLoading(false);
       }
     } catch (error: unknown) {
-      if (!signal.aborted) {
-        if (
-          error instanceof ApiError &&
-          (error.status === 401 || error.status === 403)
-        ) {
-          authenticationFailed.current = true;
-        }
-        if (initialEmailSyncRegistry.getStatus(syncKey) !== "failed") {
-          updateSyncStatus("failed");
-        }
-        setSyncError(getInitialSyncErrorMessage(error));
+      if (
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403)
+      ) {
+        authenticationFailed.current = true;
       }
-    } finally {
-      if (initializationController.current === controller) {
-        initializationController.current = null;
-        initializationInFlight.current = false;
-      }
-      if (!signal.aborted) {
-        if (!syncCompleted) {
-          const currentStatus = initialEmailSyncRegistry.getStatus(syncKey);
-          setIsLoading(
-            currentStatus === "pending" || currentStatus === "running",
-          );
-          setIsRefreshing(false);
-        }
-      }
+      setIsLoading(false);
+      setSyncError(getInitialSyncErrorMessage(error));
     }
-
-    if (syncCompleted) {
-      await refresh(false, token);
-    }
-  }, [apiBaseUrl, getAccessToken, refresh, syncKey]);
+  }, [apiBaseUrl, getAccessToken, syncKey]);
 
   useEffect(() => {
-    watchAttempted.current = false;
-    initializationAttempted.current = false;
-    initializationComplete.current = false;
-    authenticationFailed.current = false;
-  }, [syncKey]);
+    if (!enabled) return;
+    void Promise.resolve().then(() => initialize());
+  }, [enabled, initialize]);
 
   const previousFilterRef = useRef<EmailFilter | undefined>(currentFilter);
   useEffect(() => {
     if (previousFilterRef.current === currentFilter) return;
     previousFilterRef.current = currentFilter;
-    if (initializationComplete.current) {
-      void refresh(false, undefined, currentFilter);
-    }
+    void refresh(false, undefined, currentFilter);
   }, [currentFilter, refresh]);
 
-  const refreshManually = useCallback(() => {
-    if (!initializationComplete.current) return initialize(true);
-    return refresh(true, undefined, currentFilter);
-  }, [currentFilter, initialize, refresh]);
-
   useEffect(() => {
-    if (!enabled) return;
-    const controller = new AbortController();
-    void Promise.resolve().then(() => {
-      if (!controller.signal.aborted) {
-        void initialize(false, controller);
-      }
-    });
+    const response = syncSnapshot.response;
+    const hasCompletedSync =
+      isInitialImportComplete(
+        response,
+        syncSnapshot.initialImportWasEligible,
+      ) ||
+      (response?.account_status === "existing" &&
+        response.incremental_sync_status === "completed");
+    if (hasCompletedSync) {
+      void refresh();
+    }
+  }, [
+    refresh,
+    syncSnapshot.initialImportWasEligible,
+    syncSnapshot.response,
+  ]);
 
-    return () => {
-      controller.abort();
-      if (initializationController.current === controller) {
-        initializationController.current = null;
-        initializationInFlight.current = false;
-      }
-    };
-  }, [enabled, initialize]);
+  const refreshManually = useCallback(() => {
+    if (
+      syncSnapshot.initialImportWasEligible &&
+      syncSnapshot.response?.status === "failed"
+    ) {
+      return refresh(true);
+    }
+    return initialize();
+  }, [
+    initialize,
+    refresh,
+    syncSnapshot.initialImportWasEligible,
+    syncSnapshot.response?.status,
+  ]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -375,17 +357,22 @@ export function useGmailSync({
     };
   }, [enabled, refresh]);
 
+  const response = syncSnapshot.response;
+  const isInitialSyncing =
+    syncSnapshot.initialImportWasEligible &&
+    (response?.status === "pending" || response?.status === "running");
+
   return {
     emails,
     setEmails,
     isLoading,
-    isInitialSyncing: syncStatus === "pending" || syncStatus === "running",
-    initialSyncFailed: syncStatus === "failed",
+    isInitialSyncing,
+    initialSyncFailed:
+      syncSnapshot.initialImportWasEligible && response?.status === "failed",
     isRefreshing,
-    error: watchError || syncError || emailError,
+    error: syncError || emailError,
     emailError,
     syncError,
-    watchError,
     refresh: refreshManually,
   };
 }

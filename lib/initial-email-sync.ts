@@ -1,47 +1,102 @@
-import type { InitialEmailSyncState } from "@/lib/api";
+import type {
+  InitialEmailSyncResponse,
+  InitialEmailSyncState,
+} from "@/lib/api";
 
-interface InitialSyncState {
-  status: InitialEmailSyncState | null;
+export interface InitialEmailSyncSnapshot {
+  response: InitialEmailSyncResponse | null;
+  initialImportWasEligible: boolean;
   startRequested: boolean;
 }
 
+interface AccountState {
+  snapshot: InitialEmailSyncSnapshot;
+  listeners: Set<() => void>;
+  initialization: Promise<void> | null;
+}
+
+const createAccountState = (): AccountState => ({
+  snapshot: {
+    response: null,
+    initialImportWasEligible: false,
+    startRequested: false,
+  },
+  listeners: new Set(),
+  initialization: null,
+});
+
 export class InitialEmailSyncRegistry {
-  private readonly accounts = new Map<string, InitialSyncState>();
+  private readonly accounts = new Map<string, AccountState>();
 
   private getAccount(key: string) {
     let account = this.accounts.get(key);
     if (!account) {
-      account = { status: null, startRequested: false };
+      account = createAccountState();
       this.accounts.set(key, account);
     }
     return account;
   }
 
-  getStatus(key: string) {
-    return this.getAccount(key).status;
+  getSnapshot(key: string) {
+    return this.getAccount(key).snapshot;
+  }
+
+  subscribe(key: string, listener: () => void) {
+    const account = this.getAccount(key);
+    account.listeners.add(listener);
+    return () => account.listeners.delete(listener);
+  }
+
+  private update(key: string, snapshot: InitialEmailSyncSnapshot) {
+    const account = this.getAccount(key);
+    account.snapshot = snapshot;
+    account.listeners.forEach((listener) => listener());
+  }
+
+  setResponse(key: string, response: InitialEmailSyncResponse) {
+    const snapshot = this.getSnapshot(key);
+    this.update(key, {
+      ...snapshot,
+      response,
+      initialImportWasEligible:
+        snapshot.initialImportWasEligible ||
+        (response.account_status === "new" && response.sync_mode === "initial"),
+    });
+  }
+
+  setStatus(key: string, status: InitialEmailSyncState) {
+    const snapshot = this.getSnapshot(key);
+    if (!snapshot.response) return;
+    this.update(key, {
+      ...snapshot,
+      response: { ...snapshot.response, status },
+    });
   }
 
   markStartRequested(key: string) {
-    const account = this.getAccount(key);
-    if (account.startRequested) return false;
-    account.startRequested = true;
+    const snapshot = this.getSnapshot(key);
+    if (snapshot.startRequested) return false;
+    this.update(key, { ...snapshot, startRequested: true });
     return true;
   }
 
-  clearStartRequest(key: string) {
-    this.getAccount(key).startRequested = false;
-  }
-
-  setStatus(key: string, status: InitialEmailSyncState | null) {
-    this.getAccount(key).status = status;
-  }
-
-  resetFailedSync(key: string) {
+  runInitialization(key: string, initialize: () => Promise<void>) {
     const account = this.getAccount(key);
-    if (account.status !== "failed") return false;
-    account.status = null;
-    account.startRequested = false;
-    return true;
+    if (account.initialization) return account.initialization;
+
+    const initialization = Promise.resolve()
+      .then(initialize)
+      .finally(() => {
+        if (account.initialization === initialization) {
+          account.initialization = null;
+        }
+      });
+    account.initialization = initialization;
+    return initialization;
+  }
+
+  getStatus(key: string) {
+    return this.getSnapshot(key).response?.status ?? null;
   }
 }
 
@@ -72,9 +127,9 @@ export type InitialSyncPollResult =
 export const INITIAL_EMAIL_SYNC_POLL_INTERVAL_MS = 4500;
 
 export async function pollInitialEmailSync(
-  readStatus: (signal: AbortSignal) => Promise<InitialEmailSyncState>,
+  readStatus: (signal: AbortSignal) => Promise<InitialEmailSyncResponse>,
   signal: AbortSignal,
-  onStatus: (status: InitialEmailSyncState) => void,
+  onStatus: (status: InitialEmailSyncResponse) => void,
   {
     intervalMs = INITIAL_EMAIL_SYNC_POLL_INTERVAL_MS,
     timeoutMs = 10 * 60 * 1000,
@@ -102,10 +157,13 @@ export async function pollInitialEmailSync(
       requestController.abort();
     }, Math.min(requestTimeoutMs, remainingMs));
     try {
-      const status = await readStatus(requestController.signal);
+      const response = await readStatus(requestController.signal);
       if (signal.aborted) return "aborted";
-      onStatus(status);
-      if (status === "completed" || status === "failed") return status;
+      onStatus(response);
+      if (response.status === "completed" || response.status === "already_completed") {
+        return "completed";
+      }
+      if (response.status === "failed") return "failed";
     } catch (error: unknown) {
       if (signal.aborted) return "aborted";
       if (!requestTimedOut) {

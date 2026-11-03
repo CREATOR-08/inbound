@@ -20,6 +20,15 @@ const withFetch = async (fetchMock, run) => {
   }
 };
 
+const syncResponse = (status, overrides = {}) => ({
+  status,
+  account_status: "existing",
+  sync_mode: "incremental",
+  stored_email_count: 0,
+  incremental_sync_status: null,
+  ...overrides,
+});
+
 test("accepts 202 pending and running responses with zero imported emails", async () => {
   for (const status of ["pending", "running"]) {
     await withFetch(async (url, init) => {
@@ -31,7 +40,10 @@ test("accepts 202 pending and running responses with zero imported emails", asyn
       assert.equal(init.headers.get("Authorization"), "Bearer access-token");
       return new Response(
         JSON.stringify({
-          status,
+          ...syncResponse(status, {
+            account_status: "new",
+            sync_mode: "initial",
+          }),
           imported_count: 0,
           skipped_count: 0,
           history_id: "1015739",
@@ -44,6 +56,9 @@ test("accepts 202 pending and running responses with zero imported emails", asyn
         "access-token",
       );
       assert.equal(response.status, status);
+      assert.equal(response.account_status, "new");
+      assert.equal(response.sync_mode, "initial");
+      assert.equal(response.stored_email_count, 0);
       assert.equal(response.imported_count, 0);
       assert.equal(response.skipped_count, 0);
       assert.equal(response.history_id, "1015739");
@@ -60,14 +75,14 @@ test("reads completed and failed states from the status endpoint", async () => {
       );
       assert.equal(init.method, undefined);
       assert.equal(init.headers.get("Authorization"), "Bearer access-token");
-      return new Response(JSON.stringify({ status }), { status: 200 });
+      return new Response(JSON.stringify(syncResponse(status)), { status: 200 });
     }, async () => {
       assert.deepEqual(
         await getInitialEmailSyncStatus(
           "http://localhost:8000",
           "access-token",
         ),
-        { status },
+        syncResponse(status),
       );
     });
   }
@@ -76,8 +91,9 @@ test("reads completed and failed states from the status endpoint", async () => {
 test("rejects malformed sync status and counts", async () => {
   for (const payload of [
     { status: "accepted" },
-    { status: "running", imported_count: -1 },
-    { status: "running", skipped_count: "0" },
+    { ...syncResponse("running"), imported_count: -1 },
+    { ...syncResponse("running"), skipped_count: "0" },
+    { status: "pending" },
   ]) {
     await withFetch(async () => new Response(JSON.stringify(payload), { status: 202 }), async () => {
       await assert.rejects(
@@ -88,17 +104,56 @@ test("rejects malformed sync status and counts", async () => {
   }
 });
 
-test("coalesces repeated starts and permits retry after a failed state", () => {
+test("keeps a shared one-shot start guard across account state updates", () => {
   const registry = new InitialEmailSyncRegistry();
 
   assert.equal(registry.markStartRequested("account"), true);
   assert.equal(registry.markStartRequested("account"), false);
-  registry.setStatus("account", "running");
+  registry.setResponse("account", syncResponse("running", {
+    account_status: "new",
+    sync_mode: "initial",
+  }));
+  assert.equal(registry.getSnapshot("account").startRequested, true);
+  assert.equal(registry.getSnapshot("account").initialImportWasEligible, true);
   assert.equal(registry.markStartRequested("account"), false);
   registry.setStatus("account", "failed");
-  assert.equal(registry.resetFailedSync("account"), true);
-  assert.equal(registry.getStatus("account"), null);
-  assert.equal(registry.markStartRequested("account"), true);
+  assert.equal(registry.getStatus("account"), "failed");
+  assert.equal(registry.markStartRequested("account"), false);
+});
+
+test("retains initial eligibility after the backend reports the completed account as existing", () => {
+  const registry = new InitialEmailSyncRegistry();
+
+  registry.setResponse("account", syncResponse("running", {
+    account_status: "new",
+    sync_mode: "initial",
+  }));
+  registry.setResponse("account", syncResponse("completed", {
+    account_status: "existing",
+    sync_mode: "incremental",
+  }));
+
+  assert.equal(registry.getSnapshot("account").initialImportWasEligible, true);
+  assert.equal(registry.getStatus("account"), "completed");
+});
+
+test("shares an in-flight initialization between remounts", async () => {
+  const registry = new InitialEmailSyncRegistry();
+  let calls = 0;
+  let release;
+  const initialize = async () => {
+    calls += 1;
+    await new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+
+  const first = registry.runInitialization("account", initialize);
+  const second = registry.runInitialization("account", initialize);
+  await Promise.resolve();
+  assert.equal(calls, 1);
+  release();
+  await Promise.all([first, second]);
 });
 
 test("polls sequentially until completion and stops on failure", async () => {
@@ -111,12 +166,15 @@ test("polls sequentially until completion and stops on failure", async () => {
     async () => {
       activeRequests += 1;
       maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
-      const status = statuses.shift();
+      const status = syncResponse(statuses.shift(), {
+        account_status: "new",
+        sync_mode: "initial",
+      });
       activeRequests -= 1;
       return status;
     },
     new AbortController().signal,
-    (status) => observed.push(status),
+    (status) => observed.push(status.status),
     { intervalMs: 0 },
   );
 
@@ -128,7 +186,7 @@ test("polls sequentially until completion and stops on failure", async () => {
   const failedResult = await pollInitialEmailSync(
     async () => {
       failureReads += 1;
-      return "failed";
+      return syncResponse("failed");
     },
     new AbortController().signal,
     () => {},
@@ -152,7 +210,7 @@ test("uses a 4.5 second start-to-start interval without overlapping requests", a
       await new Promise((resolve) => setTimeout(resolve, 25));
       activeRequests -= 1;
       reads += 1;
-      return reads === 3 ? "completed" : "running";
+      return syncResponse(reads === 3 ? "completed" : "running");
     },
     new AbortController().signal,
     () => {},
@@ -175,7 +233,7 @@ test("retries temporary network errors and cleans up the polling timer on abort"
     async () => {
       retryReads += 1;
       if (retryReads === 1) throw new TypeError("temporary network issue");
-      return "completed";
+      return syncResponse("completed");
     },
     new AbortController().signal,
     () => {},
@@ -188,7 +246,7 @@ test("retries temporary network errors and cleans up the polling timer on abort"
   let reads = 0;
   const readStatus = async () => {
     reads += 1;
-    return "running";
+    return syncResponse("running");
   };
 
   const polling = pollInitialEmailSync(
@@ -209,7 +267,7 @@ test("returns a timeout for a sync that remains pending", async () => {
   const result = await pollInitialEmailSync(
     async () => {
       reads += 1;
-      return "pending";
+      return syncResponse("pending");
     },
     new AbortController().signal,
     () => {},

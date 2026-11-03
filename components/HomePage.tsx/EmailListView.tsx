@@ -12,7 +12,6 @@ interface EmailListViewProps {
   initialSyncFailed: boolean;
   isRefreshing: boolean;
   error: string;
-  syncError: string;
   hasLoadError: boolean;
   onSelectEmail: (emailId: string) => void;
   onRefresh: () => void;
@@ -48,7 +47,6 @@ export default function EmailListView({
   initialSyncFailed,
   isRefreshing,
   error,
-  syncError,
   hasLoadError,
   onSelectEmail,
   onRefresh,
@@ -181,14 +179,15 @@ export default function EmailListView({
               Initial sync couldn&apos;t be completed
             </p>
             <p className="max-w-sm text-xs leading-relaxed text-slate-500">
-              Check your connection and try synchronizing your inbox again.
+              The initial import will not restart automatically. You can refresh
+              to load any emails already saved to your inbox.
             </p>
             <button
               type="button"
               onClick={onRefresh}
               className="mt-1 rounded-lg border border-violet-300/20 px-3 py-2 text-xs font-medium text-violet-200 transition hover:border-violet-300/40 hover:bg-violet-400/[0.08]"
             >
-              Retry sync
+              Refresh inbox
             </button>
           </div>
         ) : isLoading ? (
