@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Archive,
   ArrowLeft,
   CalendarDays,
   Check,
   Copy,
+  Info,
   LoaderCircle,
   Mail,
   Send,
@@ -72,6 +74,170 @@ const getInitials = (value: string) =>
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
     .join("") || "?";
+
+function RemoteImagesInfo() {
+  const [open, setOpen] = useState(false);
+  const [renderTooltip, setRenderTooltip] = useState(false);
+  const [positioned, setPositioned] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 12, above: false });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTooltip = useCallback(() => {
+    setOpen(false);
+    setPositioned(false);
+    if (unmountTimerRef.current) clearTimeout(unmountTimerRef.current);
+    unmountTimerRef.current = setTimeout(() => setRenderTooltip(false), 160);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      if (unmountTimerRef.current) clearTimeout(unmountTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const updatePosition = () => {
+      const trigger = triggerRef.current;
+      const tooltip = tooltipRef.current;
+      if (!trigger || !tooltip) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const left = Math.min(
+        Math.max(12, triggerRect.left),
+        window.innerWidth - tooltipRect.width - 12,
+      );
+      const below = triggerRect.bottom + 8;
+      const above = triggerRect.top - tooltipRect.height - 8;
+      const placeAbove =
+        below + tooltipRect.height > window.innerHeight - 12 &&
+        above >= 12;
+      const top = placeAbove
+        ? above
+        : Math.min(below, window.innerHeight - tooltipRect.height - 12);
+
+      setPosition({ top, left, above: placeAbove });
+      setPositioned(true);
+    };
+
+    const animationFrame = window.requestAnimationFrame(updatePosition);
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !tooltipRef.current?.contains(target)
+      ) {
+        closeTooltip();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeTooltip();
+    };
+
+    document.addEventListener("pointerdown", handleOutsidePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      document.removeEventListener("pointerdown", handleOutsidePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [closeTooltip, open]);
+
+  const cancelScheduledClose = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const closeAfterPointerLeaves = () => {
+    cancelScheduledClose();
+    closeTimerRef.current = setTimeout(closeTooltip, 160);
+  };
+
+  const openTooltip = () => {
+    cancelScheduledClose();
+    if (unmountTimerRef.current) {
+      clearTimeout(unmountTimerRef.current);
+      unmountTimerRef.current = null;
+    }
+    setRenderTooltip(true);
+    setPositioned(false);
+    setOpen(true);
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label="Why are remote images handled this way?"
+        aria-expanded={open}
+        aria-describedby={open ? "remote-images-info-tooltip" : undefined}
+        onPointerEnter={(event) => {
+          if (event.pointerType === "mouse") openTooltip();
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType === "mouse") closeAfterPointerLeaves();
+        }}
+        onFocus={openTooltip}
+        onBlur={closeTooltip}
+        onClick={openTooltip}
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+      >
+        <Info aria-hidden="true" className="h-3.5 w-3.5" />
+      </button>
+      {renderTooltip
+        ? createPortal(
+            <div
+              ref={tooltipRef}
+              id="remote-images-info-tooltip"
+              role="tooltip"
+              aria-hidden={!open}
+              onPointerEnter={cancelScheduledClose}
+              onPointerLeave={closeAfterPointerLeaves}
+              style={{ top: position.top, left: position.left }}
+              className={`fixed z-[100] w-[min(18rem,calc(100vw-1.5rem))] rounded-xl border border-white/10 bg-[#171821] p-3.5 text-left shadow-xl shadow-black/40 transition duration-150 ease-out motion-reduce:transition-none ${
+                open && positioned
+                  ? "translate-y-0 scale-100 opacity-100"
+                  : "pointer-events-none translate-y-1 scale-[0.98] opacity-0"
+              }`}
+            >
+              <span
+                className={`absolute left-3 h-2 w-2 rotate-45 border-white/10 bg-[#171821] ${
+                  position.above
+                    ? "-bottom-1 border-b border-r"
+                    : "-top-1 border-l border-t"
+                }`}
+              />
+              <p className="relative text-xs font-semibold text-slate-100">
+                Why are remote images handled this way?
+              </p>
+              <p className="relative mt-1.5 text-xs leading-relaxed text-slate-300">
+                Some emails contain tracking pixels or externally hosted images.
+                Loading them can reveal your IP address, approximate location,
+                and when you opened an email.
+              </p>
+              <p className="relative mt-2 text-xs leading-relaxed text-slate-300">
+                Inbound gives you control over when external images are loaded to
+                help protect your privacy.
+              </p>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
 
 export default function EmailDetailView({
   thread,
@@ -324,10 +490,11 @@ export default function EmailDetailView({
               <>
                 {currentSanitizedHtml?.remoteImageCount ? (
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2 text-xs text-slate-400">
-                    <span>
+                    <span className="inline-flex min-w-0 items-center gap-1">
                       {remoteImagesEnabled
                         ? "Remote images are enabled for this email."
                         : "Remote images are blocked to protect your privacy."}
+                      <RemoteImagesInfo />
                     </span>
                     <button
                       type="button"
