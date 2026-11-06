@@ -44,16 +44,7 @@ export type InitialEmailSyncState =
   | "already_completed"
   | "failed";
 
-/**
- * Normalize the API base URL.
- *
- * Supported environment values:
- *   http://localhost:8000
- *   http://localhost:8000/api
- *   http://localhost:8000/api/v1
- *
- * Endpoint paths below include /api/v1 where required.
- */
+
 export const getApiBaseUrl = () =>
   (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
     .replace(/\/+$/, "")
