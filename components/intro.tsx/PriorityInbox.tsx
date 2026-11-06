@@ -43,7 +43,7 @@ export default function PriorityInbox({
               <Sparkles size={20} />
             </div>
             <span className="text-base font-semibold tracking-tight sm:text-lg">
-              MailFlow<span className="text-violet-400">.ai</span>
+              Inbound AI
             </span>
           </div>
           <span className="text-xs text-gray-500 sm:text-sm">03 / 04</span>
@@ -171,7 +171,7 @@ export default function PriorityInbox({
                       Urgent: Q3 Roadmap Alignment
                     </p>
                     <p className="mt-2 text-xs leading-5 text-gray-400">
-                      Integration specifications needed before tomorrow's
+                      Integration specifications needed before tomorrow&apos;s
                       standup.
                     </p>
                     <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-400/10 px-2.5 py-1 text-[11px] text-amber-300">

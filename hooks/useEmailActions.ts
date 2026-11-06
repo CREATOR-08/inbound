@@ -169,6 +169,16 @@ export function useEmailActions({
         );
 
         const result: unknown = await response.json();
+        if (!response.ok) {
+          const detail =
+            typeof result === "object" &&
+            result !== null &&
+            "detail" in result &&
+            typeof result.detail === "string"
+              ? result.detail
+              : "Unable to extract a meeting.";
+          throw new Error(detail);
+        }
 
         if (!isScheduleExtractionResponse(result)) {
           throw new Error(

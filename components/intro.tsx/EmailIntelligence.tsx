@@ -41,7 +41,7 @@ export default function EmailIntelligence({
               <Sparkles size={20} />
             </div>
             <span className="text-base font-semibold tracking-tight sm:text-lg">
-              MailFlow<span className="text-violet-400">.ai</span>
+              Inbound AI
             </span>
           </div>
           <span className="text-xs text-gray-500 sm:text-sm">02 / 04</span>
@@ -66,7 +66,7 @@ export default function EmailIntelligence({
 
             <p className="mt-5 max-w-md text-sm leading-7 text-gray-400 sm:text-base">
               Stop reading every line to understand the bigger picture.
-              MailFlow.ai turns lengthy emails into concise summaries and
+              Inbound AI turns lengthy emails into concise summaries and
               highlights the context that matters.
             </p>
 
@@ -137,7 +137,7 @@ export default function EmailIntelligence({
               <div className="p-4">
                 <p className="text-sm leading-6 text-gray-400">
                   Hi team, after reviewing the Q3 roadmap, we need to finalize
-                  the integration specifications before tomorrow's meeting.
+                  the integration specifications before tomorrow&apos;s meeting.
                   Please complete API documentation and confirm testing
                   timelines by tonight.
                 </p>
@@ -151,7 +151,7 @@ export default function EmailIntelligence({
                 </div>
 
                 <p className="mt-3 text-sm leading-6 text-gray-300">
-                  Finalize Q3 integration specifications before tomorrow's
+                  Finalize Q3 integration specifications before tomorrow&apos;s
                   meeting.
                 </p>
 

@@ -13,6 +13,7 @@ import {
   initialEmailSyncRegistry,
   pollInitialEmailSync,
 } from "@/lib/initial-email-sync";
+import { getEmailFetchReadFilter } from "@/lib/email-utils";
 import type { EmailFilter, EmailThread } from "@/Types/email";
 
 interface UseGmailSyncOptions {
@@ -22,14 +23,6 @@ interface UseGmailSyncOptions {
   getAccessToken: (forceRefresh?: boolean) => Promise<string>;
   currentFilter?: EmailFilter;
 }
-
-const getFetchOptionsForFilter = (
-  filter?: EmailFilter,
-): FetchEmailsOptions | null => {
-  if (filter === "READ") return { is_read: true };
-  if (filter === "UNREAD") return { is_read: false };
-  return null;
-};
 
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
@@ -114,7 +107,9 @@ export function useGmailSync({
         }
 
         const activeFilter = filterOverride ?? currentFilter;
-        const fetchOptions = getFetchOptionsForFilter(activeFilter);
+        const readFilter = getEmailFetchReadFilter(activeFilter);
+        const fetchOptions: FetchEmailsOptions | null =
+          readFilter === null ? null : { is_read: readFilter };
 
         try {
           const fetchedEmails = await fetchEmails(apiBaseUrl, token, fetchOptions);
@@ -320,8 +315,14 @@ export function useGmailSync({
 
   const previousFilterRef = useRef<EmailFilter | undefined>(currentFilter);
   useEffect(() => {
-    if (previousFilterRef.current === currentFilter) return;
+    const previousFilter = previousFilterRef.current;
     previousFilterRef.current = currentFilter;
+    if (
+      getEmailFetchReadFilter(previousFilter) ===
+      getEmailFetchReadFilter(currentFilter)
+    ) {
+      return;
+    }
     void refresh(false, undefined, currentFilter);
   }, [currentFilter, refresh]);
 

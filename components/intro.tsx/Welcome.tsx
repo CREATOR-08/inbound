@@ -26,7 +26,7 @@ export default function Welcome({ onNext, onSkip }: WelcomeProps) {
               <Sparkles size={20} />
             </div>
             <span className="text-base font-semibold tracking-tight sm:text-lg">
-              MailFlow<span className="text-violet-400">.ai</span>
+              Inbound AI
             </span>
           </div>
 
@@ -106,7 +106,7 @@ export default function Welcome({ onNext, onSkip }: WelcomeProps) {
                   Urgent: Q3 Roadmap Alignment
                 </h3>
                 <p className="mt-2 text-xs leading-5 text-gray-400">
-                  We need to finalize the integration specs before tomorrow's
+                  We need to finalize the integration specs before tomorrow&apos;s
                   standup...
                 </p>
               </div>
@@ -118,7 +118,7 @@ export default function Welcome({ onNext, onSkip }: WelcomeProps) {
                   AI Context Synthesis
                 </div>
                 <p className="mt-3 text-sm leading-6 text-gray-300">
-                  Finalize the Q3 integration specs before tomorrow morning's
+                  Finalize the Q3 integration specs before tomorrow morning&apos;s
                   standup meeting.
                 </p>
                 <div className="mt-3 flex items-center gap-2">

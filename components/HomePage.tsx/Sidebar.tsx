@@ -65,7 +65,7 @@ export default function Sidebar({
           <Sparkles className="h-4 w-4 text-white" />
         </div>
         <span className="whitespace-nowrap text-sm font-semibold text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
-          Inbound<span className="text-violet-400">.ai</span>
+          Inbound AI
         </span>
       </div>
 

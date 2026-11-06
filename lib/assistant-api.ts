@@ -9,6 +9,7 @@ import type {
   AssistantStatus,
   AssistantUIAction,
 } from "@/Types/assistant";
+import { consumeAssistantSSE } from "@/lib/assistant-sse";
 
 export class AssistantApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -236,4 +237,62 @@ export async function sendAssistantCommand(
   }
 
   return parseAssistantResponse(result);
+}
+
+export async function sendAssistantCommandStream(
+  baseUrl: string,
+  accessToken: string,
+  payload: AssistantCommandRequest,
+  signal: AbortSignal,
+  onToken: (token: string) => void,
+): Promise<AssistantCommandResponse> {
+  if (!accessToken.trim()) {
+    throw new AssistantApiError("An active Google connection is required.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${baseUrl.replace(/\/+$/, "").replace(/\/api(?:\/v1)?$/i, "")}/api/v1/assistant/command/stream`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify(payload),
+        signal,
+      },
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    throw new AssistantApiError(
+      "Could not reach the assistant service. Check your connection and try again.",
+    );
+  }
+
+  if (!response.ok) {
+    throw new AssistantApiError(getHttpErrorMessage(response.status), response.status);
+  }
+  if (!response.headers.get("content-type")?.includes("text/event-stream")) {
+    throw new AssistantApiError("The assistant returned an invalid streaming response.");
+  }
+
+  try {
+    const result = await consumeAssistantSSE(response, onToken, signal);
+    return parseAssistantResponse(result);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw error;
+    }
+    if (error instanceof AssistantApiError) throw error;
+    throw new AssistantApiError(
+      error instanceof Error
+        ? error.message
+        : "The assistant request failed. Please try again.",
+    );
+  }
 }

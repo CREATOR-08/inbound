@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Minus, Sparkles, Trash2, X } from "lucide-react";
+import { Minus, Sparkles, Square, Trash2, X } from "lucide-react";
 import type {
   AssistantCommandRequest,
   AssistantConversationMessage,
@@ -13,7 +13,7 @@ import type {
 import {
   AssistantApiError,
   isAssistantEmailQueryResult,
-  sendAssistantCommand,
+  sendAssistantCommandStream,
 } from "@/lib/assistant-api";
 import { dispatchAssistantAction } from "@/lib/assistant-actions";
 import AssistantEmailResultCard from "@/components/assistant/AssistantEmailResultCard";
@@ -26,6 +26,7 @@ type Message = AssistantConversationMessage & {
   requiresClarification?: boolean;
   requiresConfirmation?: boolean;
   actionFeedback?: string;
+  streaming?: boolean;
 };
 
 type AssistantPanelProps = {
@@ -190,38 +191,52 @@ export default function AssistantPanel({
     if (requestController.current) return;
     const controller = new AbortController();
     requestController.current = controller;
+    const assistantMessage = newMessage("assistant", "");
 
-    if (addUserMessage) {
-      setRetryPayload(null);
-      setMessages((previous) => [
-        ...previous,
-        newMessage("user", payload.message),
-      ]);
-      setInput("");
-    }
+    if (addUserMessage) setRetryPayload(null);
+    setMessages((previous) => [
+      ...previous,
+      ...(addUserMessage ? [newMessage("user", payload.message)] : []),
+      { ...assistantMessage, streaming: true },
+    ]);
+    if (addUserMessage) setInput("");
     setIsThinking(true);
     setError("");
 
     try {
       const accessToken = await getAccessToken();
-      const result = await sendAssistantCommand(
+      const result = await sendAssistantCommandStream(
         apiBaseUrl,
         accessToken,
         payload,
         controller.signal,
+        (token) => {
+          setMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantMessage.id
+                ? { ...message, content: message.content + token }
+                : message,
+            ),
+          );
+        },
       );
       if (!controller.signal.aborted) {
-        setMessages((previous) => [
-          ...previous,
-          {
-            ...newMessage("assistant", result.message),
-            actions: result.actions,
-            data: result.data,
-            status: result.status,
-            requiresClarification: result.requires_clarification,
-            requiresConfirmation: result.requires_confirmation,
-          },
-        ]);
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === assistantMessage.id
+              ? {
+                  ...message,
+                  content: result.message,
+                  streaming: false,
+                  actions: result.actions,
+                  data: result.data,
+                  status: result.status,
+                  requiresClarification: result.requires_clarification,
+                  requiresConfirmation: result.requires_confirmation,
+                }
+              : message,
+          ),
+        );
         if (result.status === "error" || result.status === "rate_limited") {
           setRetryPayload(payload);
         } else {
@@ -229,6 +244,14 @@ export default function AssistantPanel({
         }
       }
     } catch (requestError) {
+      setMessages((previous) =>
+        previous.flatMap((message) => {
+          if (message.id !== assistantMessage.id) return [message];
+          return message.content
+            ? [{ ...message, streaming: false, ...(controller.signal.aborted ? {} : { status: "error" }) }]
+            : [];
+        }),
+      );
       if (!controller.signal.aborted) {
         setError(
           requestError instanceof AssistantApiError
@@ -267,6 +290,8 @@ export default function AssistantPanel({
     setRetryPayload(null);
     void submitRequest(payload, false);
   };
+
+  const stopGeneration = () => requestController.current?.abort();
 
   const openResultEmail = (email: AssistantEmailSummary) => {
     onOpenResultEmail(email);
@@ -497,7 +522,15 @@ export default function AssistantPanel({
                           }`}
                         role={message.role === "assistant" && isApplicationError(message.status) ? "alert" : undefined}
                       >
-                        {message.content}
+                        {message.content || (message.streaming ? "Thinking…" : "")}
+                        {message.streaming && (
+                          <span
+                            aria-label="Assistant is typing"
+                            className="ml-1 inline-block animate-pulse text-violet-300"
+                          >
+                            ▍
+                          </span>
+                        )}
                       </div>
                       {message.role === "assistant" && message.requiresClarification && (
                         <p className="mt-2 text-[10px] font-medium text-amber-200">
@@ -639,19 +672,6 @@ export default function AssistantPanel({
                 );
               })}
 
-              {isThinking && (
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">
-                    ✦
-                  </div>
-
-                  <div className="flex items-center gap-1.5 rounded-xl border border-white/[0.07] px-4 py-3">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-400 [animation-delay:-0.2s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-400 [animation-delay:-0.1s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-violet-400" />
-                  </div>
-                </div>
-              )}
               {error && (
                 <div role="alert" className="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] px-3.5 py-3 text-xs leading-5 text-rose-200">
                   <p>{error}</p>
@@ -705,28 +725,40 @@ export default function AssistantPanel({
                 Enter to send · Shift + Enter for a new line
               </span>
 
-              <button
-                type="submit"
-                disabled={!input.trim() || isThinking}
-                aria-label="Send message"
-                className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500 text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                <svg
-                  width="17"
-                  height="17"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
+              {isThinking ? (
+                <button
+                  type="button"
+                  onClick={stopGeneration}
+                  aria-label="Stop generating"
+                  title="Stop generating"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/80 text-white transition hover:bg-rose-400"
                 >
-                  <path
-                    d="M12 19V5M6 11L12 5L18 11"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+                  <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!input.trim()}
+                  aria-label="Send message"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500 text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M12 19V5M6 11L12 5L18 11"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              )}
             </div>
           </form>
 

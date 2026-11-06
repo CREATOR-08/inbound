@@ -8,6 +8,7 @@ import type {
   ScheduleProposal,
 } from "@/Types/email";
 import { confirmCalendarEvent } from "@/lib/api";
+import { getScheduleClarification } from "@/lib/email-utils";
 import {
   formatIstCalendarDateTime,
   isoToIstDateTimeInput,
@@ -77,6 +78,7 @@ export default function ScheduleModal({
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmation, setConfirmation] = useState<{ startTime: string; endTime: string } | null>(null);
+  const clarification = getScheduleClarification(proposal);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const successButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -301,13 +303,12 @@ export default function ScheduleModal({
               </div>
             )}
 
-            {proposal.confidence === 0 && (
+            {clarification && (
               <p
                 role="status"
                 className="mb-4 rounded-xl border border-amber-400/20 bg-amber-400/[0.07] px-3.5 py-3 text-xs leading-relaxed text-amber-100"
               >
-                {proposal.ambiguity ||
-                  "The email does not provide complete, unambiguous event times. Enter the start and end times manually."}
+                {clarification}
               </p>
             )}
 

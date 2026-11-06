@@ -83,6 +83,7 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     retryEmailBody,
   } = useEmailBody({
     apiBaseUrl,
+    cacheScope: user.email,
     selectedEmail: activeThread,
     setEmails: setThreads,
     getAccessToken: getGoogleToken,

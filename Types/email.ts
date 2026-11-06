@@ -28,6 +28,7 @@ export interface CalendarEventDraft {
   attendees: string[];
   confidence?: number;
   ambiguity?: string | null;
+  extraction_status?: "complete" | "missing" | "ambiguous" | "invalid";
 }
 
 export interface ScheduleProposal extends CalendarEventDraft {

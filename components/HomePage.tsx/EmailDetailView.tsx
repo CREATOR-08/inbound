@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import type { EmailThread, ReplyDraft } from "@/Types/email";
+import { sanitizeEmailHtml } from "@/lib/email-html";
 
 interface EmailDetailViewProps {
   thread: EmailThread;
@@ -72,98 +73,6 @@ const getInitials = (value: string) =>
     .map((part) => part[0].toUpperCase())
     .join("") || "?";
 
-const replaceUnavailableImage = (image: HTMLImageElement) => {
-  const fallback = image.ownerDocument.createElement("span");
-  fallback.className = "email-image-fallback";
-  fallback.textContent = image.getAttribute("alt")?.trim() || "Image unavailable";
-  image.replaceWith(fallback);
-};
-
-const sanitizeEmailHtml = (html: string) => {
-  const document = new DOMParser().parseFromString(html, "text/html");
-  document
-    .querySelectorAll(
-      "script,style,iframe,frame,object,embed,form,input,button,select,option,textarea,link,meta,base,video,audio,source,svg,math",
-    )
-    .forEach((element) => element.remove());
-
-  const allowedStyles = new Set([
-    "background-color",
-    "border",
-    "border-color",
-    "border-style",
-    "border-width",
-    "color",
-    "display",
-    "font-family",
-    "font-size",
-    "font-style",
-    "font-weight",
-    "height",
-    "line-height",
-    "margin",
-    "padding",
-    "text-align",
-    "text-decoration",
-    "vertical-align",
-    "white-space",
-    "width",
-  ]);
-
-  document.body.querySelectorAll("*").forEach((element) => {
-    for (const attribute of Array.from(element.attributes)) {
-      const name = attribute.name.toLowerCase();
-      const value = attribute.value.trim();
-      if (name.startsWith("on") || name === "srcset" || name === "background") {
-        element.removeAttribute(attribute.name);
-      } else if (name === "style") {
-        const parsedStyle = document.createElement("span");
-        parsedStyle.setAttribute("style", value);
-        const safeDeclarations: string[] = [];
-        for (const property of Array.from(parsedStyle.style)) {
-          const propertyValue = parsedStyle.style.getPropertyValue(property);
-          if (
-            allowedStyles.has(property) &&
-            !/url\s*\(|expression\s*\(|javascript\s*:/i.test(propertyValue)
-          ) {
-            safeDeclarations.push(`${property}: ${propertyValue}`);
-          }
-        }
-        if (safeDeclarations.length > 0) {
-          element.setAttribute("style", safeDeclarations.join("; "));
-        } else {
-          element.removeAttribute("style");
-        }
-      } else if (name !== "href" && name.endsWith("href")) {
-        element.removeAttribute(attribute.name);
-      } else if (name === "href" && !/^(https?:|mailto:|#)/i.test(value)) {
-        element.removeAttribute(attribute.name);
-      } else if (name === "src" && !/^data:image\/(?:png|gif|jpeg|webp);base64,/i.test(value)) {
-        if (element.tagName.toLowerCase() === "img") {
-          if (element instanceof HTMLImageElement) replaceUnavailableImage(element);
-        } else {
-          element.removeAttribute(attribute.name);
-        }
-      }
-    }
-  });
-
-  document.body.querySelectorAll("a[href]").forEach((link) => {
-    const href = link.getAttribute("href") || "";
-    if (/^https?:/i.test(href)) {
-      link.setAttribute("target", "_blank");
-      link.setAttribute("rel", "noopener noreferrer");
-    }
-  });
-  document.body.querySelectorAll("img").forEach((image) => {
-    image.removeAttribute("width");
-    image.removeAttribute("height");
-    if (!image.hasAttribute("src")) replaceUnavailableImage(image);
-  });
-
-  return document.body.innerHTML;
-};
-
 export default function EmailDetailView({
   thread,
   isRead,
@@ -187,9 +96,16 @@ export default function EmailDetailView({
   onCopyReply,
   onSendReply,
 }: EmailDetailViewProps) {
-  const [sanitizedHtml, setSanitizedHtml] = useState<{ emailId: string; html: string } | null>(null);
+  const [sanitizedHtml, setSanitizedHtml] = useState<{
+    emailId: string;
+    html: string;
+    remoteImageCount: number;
+  } | null>(null);
+  const [remoteImagesEnabledForId, setRemoteImagesEnabledForId] = useState<string | null>(null);
   const [replyOpenForId, setReplyOpenForId] = useState<string | null>(null);
-  const safeHtml = sanitizedHtml?.emailId === thread.id ? sanitizedHtml.html : "";
+  const currentSanitizedHtml = sanitizedHtml?.emailId === thread.id ? sanitizedHtml : null;
+  const safeHtml = currentSanitizedHtml?.html || "";
+  const remoteImagesEnabled = remoteImagesEnabledForId === thread.id;
   const showReply = replyOpenForId === thread.id;
   const activeReply = replyDraft?.email_id === thread.id ? replyDraft : null;
   const sender = getSenderDetails(thread.sender || "");
@@ -202,17 +118,6 @@ export default function EmailDetailView({
   const resizeEmailFrame = (frame: HTMLIFrameElement) => {
     const frameDocument = frame.contentDocument;
     if (!frameDocument) return;
-    frameDocument.querySelectorAll("img").forEach((image) => {
-      image.addEventListener(
-        "error",
-        () => {
-          replaceUnavailableImage(image);
-          window.requestAnimationFrame(() => resizeEmailFrame(frame));
-        },
-        { once: true },
-      );
-      if (image.complete && image.naturalWidth === 0) replaceUnavailableImage(image);
-    });
     const contentHeight = Math.max(
       frameDocument.documentElement.scrollHeight,
       frameDocument.body.scrollHeight,
@@ -222,13 +127,46 @@ export default function EmailDetailView({
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
+      const result = thread.body_html
+        ? sanitizeEmailHtml(thread.body_html, remoteImagesEnabled)
+        : { html: "", remoteImageCount: 0 };
       setSanitizedHtml({
         emailId: thread.id,
-        html: thread.body_html ? sanitizeEmailHtml(thread.body_html) : "",
+        ...result,
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [thread.id, thread.body_html]);
+  }, [remoteImagesEnabled, thread.body_html, thread.id]);
+
+  const handleEmailFrameLoad = (frame: HTMLIFrameElement) => {
+    const frameDocument = frame.contentDocument;
+    if (!frameDocument) return;
+    frameDocument.querySelectorAll("img").forEach((image) => {
+      image.addEventListener(
+        "load",
+        () => resizeEmailFrame(frame),
+        { once: true },
+      );
+      image.addEventListener(
+        "error",
+        () => {
+          const fallback = frameDocument.createElement("span");
+          fallback.className = "email-image-fallback";
+          fallback.textContent = image.getAttribute("alt")?.trim() || "Image unavailable";
+          image.replaceWith(fallback);
+          resizeEmailFrame(frame);
+        },
+        { once: true },
+      );
+      if (image.complete && image.naturalWidth === 0) {
+        const fallback = frameDocument.createElement("span");
+        fallback.className = "email-image-fallback";
+        fallback.textContent = image.getAttribute("alt")?.trim() || "Image unavailable";
+        image.replaceWith(fallback);
+      }
+    });
+    resizeEmailFrame(frame);
+  };
 
   const handleReply = () => {
     onOpenReply(thread);
@@ -383,15 +321,39 @@ export default function EmailDetailView({
                 </button>
               </div>
             ) : safeHtml ? (
-              <iframe
-                title="Email message"
-                sandbox="allow-same-origin allow-popups"
-                referrerPolicy="no-referrer"
-                onLoad={(event) => resizeEmailFrame(event.currentTarget)}
-                srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box;max-width:100%}html,body{width:100%;min-height:100%;margin:0}body{padding:24px clamp(16px,4vw,40px);font:15px/1.75 ui-sans-serif,system-ui,sans-serif;color:#1f2937;background:#f8fafc;overflow-wrap:anywhere;word-break:normal}a{color:#4f46e5;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}img{display:inline-block;max-width:100%;height:auto;object-fit:contain}table{display:block;width:100%;overflow-x:auto;border-collapse:collapse}pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}blockquote{margin-left:0;padding-left:16px;border-left:3px solid #cbd5e1;color:#475569}.email-image-fallback{display:inline-block;max-width:100%;padding:8px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f1f5f9;color:#64748b;font:13px/1.5 ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}</style></head><body>${safeHtml}</body></html>`}
-                className="block w-full border-0 bg-slate-50"
-                style={{ height: "1px" }}
-              />
+              <>
+                {currentSanitizedHtml?.remoteImageCount ? (
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/[0.08] bg-white/[0.025] px-3 py-2 text-xs text-slate-400">
+                    <span>
+                      {remoteImagesEnabled
+                        ? "Remote images are enabled for this email."
+                        : "Remote images are blocked to protect your privacy."}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRemoteImagesEnabledForId(
+                          remoteImagesEnabled ? null : thread.id,
+                        )
+                      }
+                      className="rounded-md px-2 py-1 font-medium text-violet-300 transition hover:bg-violet-400/10 hover:text-violet-200"
+                    >
+                      {remoteImagesEnabled
+                        ? "Hide remote images"
+                        : `Load ${currentSanitizedHtml.remoteImageCount} remote image${currentSanitizedHtml.remoteImageCount === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                ) : null}
+                <iframe
+                  title="Email message"
+                  sandbox="allow-same-origin allow-popups"
+                  referrerPolicy="no-referrer"
+                  onLoad={(event) => handleEmailFrameLoad(event.currentTarget)}
+                  srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"><style>*{box-sizing:border-box;max-width:100%}html,body{width:100%;min-height:100%;margin:0}body{padding:24px clamp(16px,4vw,40px);font:15px/1.75 ui-sans-serif,system-ui,sans-serif;color:#1f2937;background:#f8fafc;overflow-wrap:anywhere;word-break:normal}a{color:#4f46e5;text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}img{display:inline-block;max-width:100%;height:auto;object-fit:contain}table{display:block;width:100%;overflow-x:auto;border-collapse:collapse}pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}blockquote{margin-left:0;padding-left:16px;border-left:3px solid #cbd5e1;color:#475569}.email-image-fallback{display:inline-block;max-width:100%;padding:8px 12px;border:1px dashed #94a3b8;border-radius:8px;background:#f1f5f9;color:#64748b;font:13px/1.5 ui-sans-serif,system-ui,sans-serif;overflow-wrap:anywhere}</style></head><body>${safeHtml}</body></html>`}
+                  className="block w-full border-0 bg-slate-50"
+                  style={{ height: "1px" }}
+                />
+              </>
             ) : (
               bodyText ? (
                 <div className="rounded-xl border border-white/[0.07] bg-[#101117] px-5 py-6 text-sm leading-7 text-slate-200 sm:px-8">

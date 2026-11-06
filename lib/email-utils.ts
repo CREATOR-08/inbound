@@ -1,6 +1,7 @@
 import type {
   EmailFilter,
   EmailThread,
+  CalendarEventDraft,
   ScheduleExtractionResponse,
 } from "@/Types/email";
 
@@ -51,7 +52,28 @@ export const isScheduleExtractionResponse = (
     event.attendees.every((attendee) => typeof attendee === "string") &&
     "status" in event &&
     typeof event.status === "string" &&
-    ["PENDING", "APPROVED", "CANCELLED"].includes(event.status)
+    ["PENDING", "APPROVED", "CANCELLED"].includes(event.status) &&
+    (!("extraction_status" in event) ||
+      (typeof event.extraction_status === "string" &&
+        ["complete", "missing", "ambiguous", "invalid"].includes(
+          event.extraction_status,
+        )))
+  );
+};
+
+export const getScheduleClarification = (
+  proposal: Pick<CalendarEventDraft, "confidence" | "ambiguity" | "extraction_status">,
+) => {
+  if (
+    proposal.confidence !== 0 &&
+    (proposal.extraction_status === undefined ||
+      proposal.extraction_status === "complete")
+  ) {
+    return null;
+  }
+  return (
+    proposal.ambiguity ||
+    "The email does not provide complete, unambiguous event times. Enter the start and end times manually."
   );
 };
 
@@ -59,6 +81,12 @@ export const isArchivedEmail = (email: EmailThread) => email.is_archived === tru
 
 export const isScheduledEmail = (email: EmailThread, scheduledEmailIds: ReadonlySet<string>) =>
   scheduledEmailIds.has(email.id) || Boolean(email.calendar_event);
+
+export const getEmailFetchReadFilter = (filter?: EmailFilter) => {
+  if (filter === "READ") return true;
+  if (filter === "UNREAD") return false;
+  return null;
+};
 
 export const matchesEmailFilter = (
   email: EmailThread,

@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, fetchEmailBody } from "@/lib/api";
 import type { EmailThread } from "@/Types/email";
+import {
+  getOrCreateEmailBodyRequest,
+  type SharedEmailBodyRequest,
+} from "@/lib/email-body-request";
 
 interface UseEmailBodyOptions {
   apiBaseUrl: string;
+  cacheScope: string;
   selectedEmail: EmailThread | null;
   setEmails: React.Dispatch<React.SetStateAction<EmailThread[]>>;
   getAccessToken: () => Promise<string>;
@@ -15,8 +20,54 @@ interface UseEmailBodyOptions {
 const getErrorMessage = (error: unknown, fallback: string) =>
   error instanceof Error ? error.message : fallback;
 
+type EmailBody = Awaited<ReturnType<typeof fetchEmailBody>>;
+
+const createAbortError = () =>
+  new DOMException("The email body request was cancelled.", "AbortError");
+
+const consumeEmailBodyRequest = (
+  request: SharedEmailBodyRequest<EmailBody>,
+  signal?: AbortSignal,
+) => {
+  if (signal?.aborted) return Promise.reject(createAbortError());
+  request.consumers += 1;
+
+  return new Promise<EmailBody>((resolve, reject) => {
+    let active = true;
+    const release = () => {
+      if (!active) return false;
+      active = false;
+      signal?.removeEventListener("abort", onAbort);
+      request.consumers -= 1;
+      if (!request.settled && request.consumers === 0) {
+        request.controller.abort();
+      }
+      return true;
+    };
+    const onAbort = () => {
+      if (release()) reject(createAbortError());
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    request.promise.then(
+      (body) => {
+        if (release()) resolve(body);
+      },
+      (error: unknown) => {
+        if (release()) reject(error);
+      },
+    );
+  });
+};
+
 export function useEmailBody({
   apiBaseUrl,
+  cacheScope,
   selectedEmail,
   setEmails,
   getAccessToken,
@@ -24,12 +75,22 @@ export function useEmailBody({
 }: UseEmailBodyOptions) {
   const [loadingEmailId, setLoadingEmailId] = useState<string | null>(null);
   const [bodyError, setBodyError] = useState<{ emailId: string; message: string } | null>(null);
-  const bodyCache = useRef(new Map<string, Awaited<ReturnType<typeof fetchEmailBody>>>());
-  const bodyRequests = useRef(new Map<string, Promise<Awaited<ReturnType<typeof fetchEmailBody>>>>());
+  const bodyCache = useRef(new Map<string, EmailBody>());
+  const bodyRequests = useRef(new Map<string, SharedEmailBodyRequest<EmailBody>>());
+  const cacheContext = JSON.stringify([apiBaseUrl, cacheScope]);
+  const cacheContextRef = useRef(cacheContext);
+
+  useLayoutEffect(() => {
+    cacheContextRef.current = cacheContext;
+    bodyCache.current.clear();
+    bodyRequests.current.forEach((request) => request.controller.abort());
+    bodyRequests.current.clear();
+  }, [cacheContext]);
 
   const loadEmailBody = useCallback(
-    async (emailId: string) => {
-      const cachedBody = bodyCache.current.get(emailId);
+    async (emailId: string, signal?: AbortSignal) => {
+      const requestKey = JSON.stringify([cacheContext, emailId]);
+      const cachedBody = bodyCache.current.get(requestKey);
       if (cachedBody) {
         setEmails((current) =>
           current.map((email) => (email.id === emailId ? { ...email, ...cachedBody } : email)),
@@ -37,31 +98,37 @@ export function useEmailBody({
         return cachedBody;
       }
 
-      const existingRequest = bodyRequests.current.get(emailId);
-      if (existingRequest) return existingRequest;
+      const request = getOrCreateEmailBodyRequest(
+        bodyRequests.current,
+        requestKey,
+        async (signal) => {
+          const token = await getAccessToken();
+          if (signal.aborted) throw createAbortError();
+          const body = await fetchEmailBody(
+            apiBaseUrl,
+            emailId,
+            token,
+            signal,
+          );
+          if (cacheContextRef.current !== cacheContext) throw createAbortError();
+          bodyCache.current.set(requestKey, body);
+          setEmails((current) =>
+            current.map((email) => (email.id === emailId ? { ...email, ...body } : email)),
+          );
+          return body;
+        },
+      );
 
-      const request = (async () => {
-        const token = await getAccessToken();
-        const body = await fetchEmailBody(apiBaseUrl, emailId, token);
-        bodyCache.current.set(emailId, body);
-        setEmails((current) =>
-          current.map((email) => (email.id === emailId ? { ...email, ...body } : email)),
-        );
-        return body;
-      })();
-      bodyRequests.current.set(emailId, request);
       try {
-        return await request;
+        return await consumeEmailBodyRequest(request, signal);
       } catch (error: unknown) {
         if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
           invalidateAccessToken();
         }
         throw error;
-      } finally {
-        if (bodyRequests.current.get(emailId) === request) bodyRequests.current.delete(emailId);
       }
     },
-    [apiBaseUrl, getAccessToken, invalidateAccessToken, setEmails],
+    [apiBaseUrl, cacheContext, getAccessToken, invalidateAccessToken, setEmails],
   );
 
   const selectedEmailId = selectedEmail?.id ?? null;
@@ -71,11 +138,12 @@ export function useEmailBody({
   useEffect(() => {
     if (!selectedEmailId || selectedEmailHasBody) return;
     let cancelled = false;
+    const controller = new AbortController();
     const emailId = selectedEmailId;
     const timer = window.setTimeout(() => {
       setLoadingEmailId(emailId);
       setBodyError(null);
-      loadEmailBody(emailId)
+      loadEmailBody(emailId, controller.signal)
         .catch((error: unknown) => {
           if (!cancelled) {
             setBodyError({
@@ -91,6 +159,7 @@ export function useEmailBody({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      controller.abort();
     };
   }, [loadEmailBody, selectedEmailHasBody, selectedEmailId]);
 

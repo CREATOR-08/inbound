@@ -448,6 +448,7 @@ export async function fetchEmailBody(
   baseUrl: string,
   emailId: string,
   token: string,
+  signal?: AbortSignal,
 ) {
   if (!token.trim()) {
     throw new Error("An active Google access token is required.");
@@ -457,6 +458,7 @@ export async function fetchEmailBody(
     baseUrl,
     `/api/v1/emails/${encodeURIComponent(emailId)}/body`,
     {
+      signal,
       headers: {
         Authorization: `Bearer ${token}`,
       },

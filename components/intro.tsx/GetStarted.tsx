@@ -60,7 +60,7 @@ try {
             </div>
 
             <span className="text-base font-semibold tracking-tight sm:text-lg">
-              MailFlow<span className="text-violet-400">.ai</span>
+              Inbound AI
             </span>
           </div>
 
@@ -86,7 +86,7 @@ try {
 
           <p className="mt-3 text-sm leading-6 text-gray-400">
             Sign in securely with your Google account to continue
-            to MailFlow.ai.
+            to Inbound AI.
           </p>
 
           {/* Google OAuth */}

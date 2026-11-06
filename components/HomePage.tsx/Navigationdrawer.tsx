@@ -95,7 +95,7 @@ export default function NavigationDrawer({
               <Sparkles className="h-4 w-4 text-white" />
             </div>
             <span className="font-bold text-sm tracking-tight text-white">
-              MailFlow<span className="text-violet-400">.ai</span>
+              Inbound AI
             </span>
           </div>
         </div>

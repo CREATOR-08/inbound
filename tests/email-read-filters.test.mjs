@@ -6,7 +6,10 @@ import {
   markEmailUnread,
   updateEmailReadStatus,
 } from "../lib/api.ts";
-import { matchesEmailFilter } from "../lib/email-utils.ts";
+import {
+  getEmailFetchReadFilter,
+  matchesEmailFilter,
+} from "../lib/email-utils.ts";
 
 const withFetch = async (fetchMock, run) => {
   const originalFetch = globalThis.fetch;
@@ -30,6 +33,14 @@ const makeEmailThread = (overrides = {}) => ({
   is_archived: false,
   is_read: false,
   ...overrides,
+});
+
+test("only read and unread folder changes require a different server query", () => {
+  assert.equal(getEmailFetchReadFilter("READ"), true);
+  assert.equal(getEmailFetchReadFilter("UNREAD"), false);
+  assert.equal(getEmailFetchReadFilter("ALL"), null);
+  assert.equal(getEmailFetchReadFilter("TRIAGED"), null);
+  assert.equal(getEmailFetchReadFilter("URGENT"), null);
 });
 
 test("fetchEmails requests backend with query parameters based on filter options", async () => {
@@ -187,4 +198,3 @@ test("matchesEmailFilter filters correctly for ALL, UNREAD, and READ", () => {
     false,
   );
 });
-
