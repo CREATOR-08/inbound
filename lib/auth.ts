@@ -21,6 +21,7 @@ const syncGoogleAccount = async (
     refreshToken?: string | null;
     accessTokenExpiresAt?: Date | null;
   },
+  
   endpointContext: {
     context: {
       internalAdapter: {
@@ -58,6 +59,10 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: false,
   },
+  trustedOrigins: [
+    "http://localhost:3000",
+    "https://inbound-opal.vercel.app/",
+  ],
 
   socialProviders: {
     google: {
