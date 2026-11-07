@@ -51,7 +51,7 @@ const syncGoogleAccount = async (
 };
 
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  baseURL: process.env.BETTER_AUTH_URL ,
   secret: process.env.BETTER_AUTH_SECRET,
 
   database: pool,
@@ -60,7 +60,6 @@ export const auth = betterAuth({
     enabled: false,
   },
   trustedOrigins: [
-    "http://localhost:3000",
     "https://inbound-opal.vercel.app/",
   ],
 

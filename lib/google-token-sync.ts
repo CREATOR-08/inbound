@@ -38,8 +38,15 @@ export async function syncGoogleTokensToBackend(
   );
 
   if (!response.ok) {
+    const errorBody = await response.text();
+
+    console.error("[Google Token Sync] Backend failure:", {
+      status: response.status,
+      body: errorBody,
+    });
+
     throw new Error(
-      `Google account token sync failed (${response.status}).`,
+      `Google token sync failed (${response.status}): ${errorBody}`,
     );
   }
 }
