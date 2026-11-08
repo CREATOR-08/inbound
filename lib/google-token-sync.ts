@@ -13,9 +13,11 @@ export async function syncGoogleTokensToBackend(
     throw new Error("GOOGLE_TOKEN_SYNC_SECRET is not configured.");
   }
 
-  const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
-    .replace(/\/+$/, "")
-    .replace(/\/api(?:\/v1)?$/i, "");
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "");
+
+if (!apiBaseUrl) {
+  throw new Error("NEXT_PUBLIC_API_URL is not configured");
+}
   const response = await fetch(
     `${apiBaseUrl}/api/v1/auth/google-tokens`,
     {
