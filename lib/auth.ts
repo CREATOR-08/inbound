@@ -61,8 +61,9 @@ export const auth = betterAuth({
     enabled: false,
   },
   trustedOrigins: [
-    "https://inbound-opal.vercel.app/",
-  ],
+    "*",
+],
+  // "https://inbound-opal.vercel.app/",
 
   socialProviders: {
     google: {
