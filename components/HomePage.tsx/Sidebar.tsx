@@ -59,17 +59,17 @@ export default function Sidebar({
     .toUpperCase();
 
   return (
-    <aside className="group relative z-20 flex h-full w-16 shrink-0 flex-col overflow-hidden border-r border-white/[0.07] bg-[#090a10] transition-[width] duration-300 ease-in-out hover:w-64 focus-within:w-64">
-      <div className="flex min-h-16 items-center gap-3 overflow-hidden border-b border-white/[0.07] px-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600 shadow-lg shadow-violet-900/30">
+    <aside className="relative z-20 flex h-full w-14 shrink-0 flex-col overflow-hidden border-r border-white/[0.07] bg-[#090a10] sm:w-16 md:w-60">
+      <div className="flex min-h-16 items-center justify-center gap-3 overflow-hidden border-b border-white/[0.07] px-3 md:justify-start md:px-5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-violet-600">
           <Sparkles className="h-4 w-4 text-white" />
         </div>
-        <span className="whitespace-nowrap text-sm font-semibold text-white opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
+        <span className="hidden whitespace-nowrap text-sm font-semibold tracking-tight text-white md:inline">
           Inbound AI
         </span>
       </div>
 
-      <nav aria-label="Email folders" className="mt-5 flex-1 space-y-1 px-2">
+      <nav aria-label="Email folders" className="mt-4 flex-1 space-y-1 px-1.5 sm:px-2">
         {navItems.map(({ id, label, icon: Icon }) => {
           const selected = currentFilter === id;
           return (
@@ -79,17 +79,17 @@ export default function Sidebar({
               onClick={() => onSelectFilter(id)}
               aria-current={selected ? "page" : undefined}
               title={label}
-              className={`flex h-10 w-full items-center gap-3 overflow-hidden rounded-xl px-3 transition ${
+              className={`relative flex h-10 w-full items-center justify-center gap-3 overflow-hidden rounded-lg px-2 transition-colors md:justify-start md:px-3 ${
                 selected
-                  ? "bg-violet-500/15 text-violet-200"
-                  : "text-slate-400 hover:bg-white/[0.05] hover:text-slate-100"
+                  ? "bg-violet-500/[0.12] text-violet-200 before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-violet-400"
+                  : "text-slate-400 hover:bg-white/[0.045] hover:text-slate-100"
               }`}
             >
-              <Icon className="h-[18px] w-[18px] shrink-0" />
-              <span className="min-w-0 flex-1 whitespace-nowrap text-left text-xs font-medium opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+              <Icon className="h-[17px] w-[17px] shrink-0" strokeWidth={1.8} />
+              <span className="hidden min-w-0 flex-1 whitespace-nowrap text-left text-[13px] font-medium md:inline">
                 {label}
               </span>
-              <span className="min-w-4 text-right text-[10px] tabular-nums text-slate-500 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+              <span className="hidden min-w-4 text-right text-[11px] tabular-nums text-slate-500 md:inline">
                 {counts[id] > 0 ? counts[id] : ""}
               </span>
             </button>
@@ -97,17 +97,17 @@ export default function Sidebar({
         })}
       </nav>
 
-      <div className="overflow-hidden border-t border-white/[0.07] p-2">
+      <div className="overflow-hidden border-t border-white/[0.07] p-1.5 sm:p-2">
         {signOutError && (
-          <p role="alert" className="mb-2 whitespace-normal px-2 text-[11px] text-rose-300">
+          <p role="alert" className="mb-2 hidden whitespace-normal px-2 text-[11px] text-rose-300 md:block">
             {signOutError}
           </p>
         )}
-        <div className="flex h-11 items-center gap-3 overflow-hidden rounded-xl px-2">
+        <div className="flex flex-col items-center gap-1 overflow-hidden rounded-xl px-0.5 py-1 md:h-12 md:flex-row md:gap-3 md:px-2 md:py-0">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-violet-400/20 bg-violet-500/10 text-[11px] font-semibold text-violet-200">
             {initials}
           </div>
-          <div className="min-w-0 flex-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <div className="hidden min-w-0 flex-1 md:block">
             <p className="truncate text-xs font-medium text-slate-200">{user.name || "Account"}</p>
             <p className="truncate text-[10px] text-slate-500">{user.email}</p>
           </div>
@@ -116,7 +116,7 @@ export default function Sidebar({
             onClick={onReconnectGoogle}
             aria-label="Reconnect Google"
             title="Reconnect Google"
-            className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-violet-300"
+            className="shrink-0 rounded-lg p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-violet-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
           >
             <RefreshCw className="h-4 w-4" />
           </button>
@@ -125,7 +125,7 @@ export default function Sidebar({
             onClick={onSignOut}
             aria-label="Sign out"
             title="Sign out"
-            className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-white/5 hover:text-rose-300"
+            className="shrink-0 rounded-lg p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-rose-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
           >
             <LogOut className="h-4 w-4" />
           </button>

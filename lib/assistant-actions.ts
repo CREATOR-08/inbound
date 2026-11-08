@@ -3,6 +3,7 @@ import type { AssistantUIAction } from "@/Types/assistant";
 interface AssistantActionCallbacks {
   availableEmailIds: ReadonlySet<string>;
   openEmail: (emailId: string) => void;
+  openCompose: (parameters: Record<string, unknown>) => string;
   navigateToInbox: () => void;
   setFilter: (filter: "ALL" | "URGENT") => void;
 }
@@ -37,12 +38,18 @@ export function dispatchAssistantAction(
     return "That filter is not supported by this inbox.";
   }
 
-  if (action.type === "NAVIGATE" && Object.keys(parameters).length === 1) {
+  if (action.type === "NAVIGATE") {
+    if (Object.keys(parameters).length !== 1 || typeof parameters.page !== "string") {
+      return "This action has invalid parameters.";
+    }
     if (parameters.page === "inbox") {
       callbacks.navigateToInbox();
       return "Opened the inbox.";
     }
-    return "That page is not available in this frontend.";
+    if (["sent", "drafts", "calendar"].includes(parameters.page)) {
+      return `The ${parameters.page} destination is not available in this frontend.`;
+    }
+    return "That destination is not supported.";
   }
 
   if (action.type === "CLEAR_FILTERS") {
@@ -54,7 +61,7 @@ export function dispatchAssistantAction(
   }
 
   if (action.type === "OPEN_COMPOSE") {
-    return "Compose is not available in this frontend.";
+    return callbacks.openCompose(parameters);
   }
 
   return "This assistant action is not supported.";

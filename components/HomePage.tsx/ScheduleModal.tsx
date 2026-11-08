@@ -77,7 +77,11 @@ export default function ScheduleModal({
   const [attendeeInput, setAttendeeInput] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ startTime: string; endTime: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    startTime: string;
+    endTime: string;
+    alreadyApproved: boolean;
+  } | null>(null);
   const clarification = getScheduleClarification(proposal);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const successButtonRef = useRef<HTMLButtonElement>(null);
@@ -209,7 +213,7 @@ export default function ScheduleModal({
         typeof result !== "object" ||
         result === null ||
         !("status" in result) ||
-        result.status !== "success" ||
+        (result.status !== "success" && result.status !== "already_approved") ||
         !("google_event_id" in result) ||
         typeof result.google_event_id !== "string"
       ) {
@@ -217,12 +221,13 @@ export default function ScheduleModal({
       }
 
       const confirmedResult: CalendarEventConfirmationResponse = {
-        status: "success",
+        status: result.status,
         google_event_id: result.google_event_id,
       };
       setConfirmation({
         startTime: payload.start_time,
         endTime: payload.end_time,
+        alreadyApproved: result.status === "already_approved",
       });
       onSuccess(confirmedResult, payload);
     } catch (caughtError: unknown) {
@@ -238,7 +243,7 @@ export default function ScheduleModal({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md"
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-3 backdrop-blur-sm sm:p-4"
       onMouseDown={handleBackdropMouseDown}
     >
       <div
@@ -246,7 +251,7 @@ export default function ScheduleModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="schedule-dialog-title"
-        className="my-auto w-full max-w-xl rounded-2xl border border-white/[0.1] bg-[#101117] p-5 shadow-2xl shadow-black/50 sm:p-7"
+        className="my-auto w-full max-w-xl rounded-2xl border border-white/[0.1] bg-[#101117] p-4 shadow-2xl shadow-black/50 sm:p-7"
       >
         {confirmation ? (
           <div className="py-5 text-center">
@@ -254,10 +259,13 @@ export default function ScheduleModal({
               <CalendarCheck2 className="h-6 w-6" />
             </div>
             <h2 id="schedule-dialog-title" className="mt-4 text-lg font-semibold text-white">
-              Added to Google Calendar
+              {confirmation.alreadyApproved
+                ? "Already on Google Calendar"
+                : "Added to Google Calendar"}
             </h2>
             <p role="status" className="mt-2 text-sm text-slate-400">
-              “{title.trim()}” is scheduled for{" "}
+              “{title.trim()}”{" "}
+              {confirmation.alreadyApproved ? "is already scheduled" : "is scheduled"} for{" "}
               {formatIstCalendarDateTime(confirmation.startTime)} –{" "}
               {formatIstCalendarDateTime(confirmation.endTime)} (IST).
             </p>
@@ -321,7 +329,7 @@ export default function ScheduleModal({
                   required
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  className="mt-1.5 w-full rounded-lg border border-white/[0.1] bg-black/30 px-3 py-2.5 text-sm text-white outline-none transition focus:border-violet-400/50"
+                  className="mt-1.5 w-full rounded-lg border border-white/[0.1] bg-[#0b0c12] px-3 py-2.5 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-violet-400/50 focus:ring-2 focus:ring-violet-400/10"
                 />
               </label>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -333,7 +341,7 @@ export default function ScheduleModal({
                     value={startTime}
                     onChange={(event) => setStartTime(event.target.value)}
                     style={{ colorScheme: "dark" }}
-                    className="mt-1.5 w-full min-w-0 rounded-lg border border-white/[0.1] bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400/50"
+                    className="mt-1.5 w-full min-w-0 rounded-lg border border-white/[0.1] bg-[#0b0c12] px-3 py-2.5 text-sm text-white outline-none transition-colors focus:border-violet-400/50 focus:ring-2 focus:ring-violet-400/10"
                   />
                 </label>
                 <label className="block text-xs font-medium text-slate-300">
@@ -344,14 +352,14 @@ export default function ScheduleModal({
                     value={endTime}
                     onChange={(event) => setEndTime(event.target.value)}
                     style={{ colorScheme: "dark" }}
-                    className="mt-1.5 w-full min-w-0 rounded-lg border border-white/[0.1] bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-400/50"
+                    className="mt-1.5 w-full min-w-0 rounded-lg border border-white/[0.1] bg-[#0b0c12] px-3 py-2.5 text-sm text-white outline-none transition-colors focus:border-violet-400/50 focus:ring-2 focus:ring-violet-400/10"
                   />
                 </label>
               </div>
 
               <div>
                 <span className="text-xs font-medium text-slate-300">Attendees</span>
-                <div className="mt-1.5 flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-white/[0.1] bg-black/30 px-2.5 py-2 focus-within:border-violet-400/50">
+                <div className="mt-1.5 flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-white/[0.1] bg-[#0b0c12] px-2.5 py-2 transition-colors focus-within:border-violet-400/50 focus-within:ring-2 focus-within:ring-violet-400/10">
                   {attendees.map((attendee) => (
                     <span
                       key={attendee}
@@ -396,14 +404,14 @@ export default function ScheduleModal({
                 type="button"
                 onClick={onClose}
                 disabled={isSubmitting}
-                className="rounded-lg px-4 py-2.5 text-xs font-medium text-slate-400 transition hover:bg-white/[0.05] hover:text-white disabled:opacity-50"
+                className="rounded-lg border border-white/[0.08] px-4 py-2.5 text-xs font-medium text-slate-300 transition-colors hover:bg-white/[0.05] hover:text-white disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
               >
                 {isSubmitting && <LoaderCircle className="h-4 w-4 animate-spin" />}
                 {isSubmitting ? "Adding to Google Calendar…" : "Add to Google Calendar"}

@@ -55,12 +55,12 @@ export default function EmailListView({
 }: EmailListViewProps) {
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col bg-[#0b0c12]" aria-label="Email list">
-      <header className="flex min-h-[76px] flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-6 py-3">
+      <header className="flex min-h-[76px] flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-3 sm:px-6">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
             Mailbox
           </p>
-          <h1 className="mt-1 text-lg font-semibold tracking-tight text-white">
+          <h1 className="mt-1 text-[17px] font-semibold tracking-tight text-slate-100">
             {filterTitles[currentFilter]}
             <span className="ml-2 text-sm font-normal text-slate-500">{threads.length}</span>
           </h1>
@@ -71,7 +71,7 @@ export default function EmailListView({
             <div
               role="group"
               aria-label="Read status filter"
-              className="flex items-center rounded-lg border border-white/[0.08] bg-white/[0.02] p-0.5"
+              className="flex items-center rounded-lg border border-white/[0.07] bg-[#101117] p-0.5"
             >
               <button
                 type="button"
@@ -79,7 +79,7 @@ export default function EmailListView({
                 aria-pressed={currentFilter === "ALL"}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
                   currentFilter === "ALL"
-                    ? "bg-violet-600 text-white shadow-sm shadow-violet-900/30"
+                    ? "bg-white/[0.09] text-slate-100 shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -91,7 +91,7 @@ export default function EmailListView({
                 aria-pressed={currentFilter === "UNREAD"}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
                   currentFilter === "UNREAD"
-                    ? "bg-violet-600 text-white shadow-sm shadow-violet-900/30"
+                    ? "bg-white/[0.09] text-slate-100 shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -104,7 +104,7 @@ export default function EmailListView({
                 aria-pressed={currentFilter === "READ"}
                 className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
                   currentFilter === "READ"
-                    ? "bg-violet-600 text-white shadow-sm shadow-violet-900/30"
+                    ? "bg-white/[0.09] text-slate-100 shadow-sm"
                     : "text-slate-400 hover:text-slate-200"
                 }`}
               >
@@ -117,7 +117,7 @@ export default function EmailListView({
             type="button"
             onClick={onRefresh}
             disabled={isRefreshing}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-slate-400 transition hover:border-white/[0.16] hover:text-slate-200 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:border-white/[0.16] hover:bg-white/[0.025] hover:text-slate-200 disabled:cursor-wait disabled:opacity-50"
             aria-label={isRefreshing ? "Refreshing inbox" : "Refresh inbox"}
             title={isRefreshing ? "Refreshing inbox" : "Refresh inbox"}
           >
@@ -134,7 +134,7 @@ export default function EmailListView({
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="grid grid-cols-[minmax(130px,0.8fr)_minmax(160px,1.1fr)_minmax(180px,2fr)_minmax(90px,auto)_minmax(110px,auto)] items-center gap-4 border-b border-white/[0.06] px-6 py-3 text-[10px] font-semibold uppercase tracking-wider text-slate-600 max-md:hidden">
+        <div className="hidden grid-cols-[minmax(130px,0.8fr)_minmax(160px,1.1fr)_minmax(180px,2fr)_minmax(90px,auto)_minmax(110px,auto)] items-center gap-4 border-b border-white/[0.06] px-6 py-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 xl:grid">
           <span>Sender</span>
           <span>Subject</span>
           <span>Preview</span>
@@ -228,51 +228,51 @@ export default function EmailListView({
                   }
                 }}
                 aria-current={isSelected ? "true" : undefined}
-                className={`group grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 border-b border-white/[0.045] px-5 py-4 text-left transition hover:bg-white/[0.035] md:grid-cols-[minmax(130px,0.8fr)_minmax(160px,1.1fr)_minmax(180px,2fr)_minmax(90px,auto)_minmax(110px,auto)] md:gap-4 md:px-6 ${
+                className={`group relative grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 border-b border-white/[0.045] px-4 py-4 text-left transition-colors hover:bg-white/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400 sm:px-6 xl:grid-cols-[minmax(130px,0.8fr)_minmax(160px,1.1fr)_minmax(180px,2fr)_minmax(90px,auto)_minmax(110px,auto)] xl:gap-4 ${
                   isSelected
-                    ? "bg-violet-500/[0.07]"
+                    ? "bg-violet-500/[0.07] before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-violet-400"
                     : !thread.is_read
                     ? "bg-white/[0.015]"
                     : ""
                 }`}
               >
-                <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 md:col-start-auto md:row-start-auto">
+                <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-2 xl:col-start-auto xl:row-start-auto">
                   {!thread.is_read && (
                     <span
                       aria-label="Unread"
-                      className="h-2 w-2 shrink-0 rounded-full bg-blue-500 shadow-sm shadow-blue-500/50"
+                      className="h-2 w-2 shrink-0 rounded-full bg-violet-400"
                     />
                   )}
                   <span
-                    className={`truncate text-xs ${
-                      thread.is_read ? "font-normal text-slate-400" : "font-semibold text-slate-100"
+                    className={`truncate text-[13px] ${
+                      thread.is_read ? "font-medium text-slate-400" : "font-semibold text-slate-100"
                     }`}
                   >
                     {thread.sender || "Unknown sender"}
                   </span>
                 </span>
                 <span
-                  className={`col-span-2 col-start-1 row-start-2 min-w-0 truncate text-xs md:col-auto md:row-auto md:col-start-auto md:row-start-auto ${
+                  className={`col-span-2 col-start-1 row-start-2 min-w-0 truncate text-[13px] xl:col-auto xl:row-auto xl:col-start-auto xl:row-start-auto ${
                     thread.is_read ? "font-normal text-slate-400" : "font-semibold text-slate-100"
                   }`}
                 >
                   {thread.subject || "(no subject)"}
                 </span>
                 <span
-                  className={`col-span-2 col-start-1 row-start-3 mt-1 line-clamp-1 text-[11px] leading-relaxed md:col-auto md:row-auto md:col-start-auto md:row-start-auto md:mt-0 ${
+                  className={`col-span-2 col-start-1 row-start-3 mt-1 line-clamp-1 text-xs leading-relaxed xl:col-auto xl:row-auto xl:col-start-auto xl:row-start-auto xl:mt-0 ${
                     thread.is_read ? "text-slate-500" : "text-slate-300"
                   }`}
                 >
                   {thread.preview || "No preview available."}
                 </span>
                 <span
-                  className={`col-start-2 row-start-1 text-right text-[10px] tabular-nums md:col-auto md:row-auto md:col-start-auto md:row-start-auto md:text-left ${
+                  className={`col-start-2 row-start-1 text-right text-[11px] tabular-nums xl:col-auto xl:row-auto xl:col-start-auto xl:row-start-auto xl:text-left ${
                     thread.is_read ? "font-normal text-slate-500" : "font-medium text-slate-300"
                   }`}
                 >
                   {displayDate(thread.received_at || thread.date)}
                 </span>
-                <span className="col-span-2 col-start-1 row-start-4 mt-2 flex flex-wrap items-center justify-between gap-1.5 md:col-auto md:row-auto md:col-start-auto md:row-start-auto md:mt-0">
+                <span className="col-span-2 col-start-1 row-start-4 mt-2 flex flex-wrap items-center justify-between gap-1.5 xl:col-auto xl:row-auto xl:col-start-auto xl:row-start-auto xl:mt-0">
                   <div className="flex items-center gap-1.5">
                     <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[9px] font-semibold uppercase tracking-wide ${
                       highPriority

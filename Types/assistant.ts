@@ -71,7 +71,18 @@ export interface AssistantUIAction {
 }
 
 export interface AssistantWorkflowStep {
-  tool: string;
+  tool:
+    | "search_emails"
+    | "read_email"
+    | "summarize_email"
+    | "triage_email"
+    | "draft_email"
+    | "send_email_reply"
+    | "mark_email_read"
+    | "mark_email_unread"
+    | "archive_emails"
+    | "schedule_event"
+    | "unknown";
   parameters: Record<string, unknown>;
   description: string;
 }
@@ -92,4 +103,6 @@ export interface AssistantCommandRequest {
   page_context: AssistantPageContext;
   conversation_history: AssistantConversationMessage[];
   query_context?: AssistantQuerySpec;
+  approved_workflow?: AssistantWorkflowStep[] | null;
+  confirm_workflow?: boolean;
 }

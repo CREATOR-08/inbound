@@ -55,7 +55,7 @@ export interface CalendarEventConfirmationPayload {
 }
 
 export interface CalendarEventConfirmationResponse {
-  status: "success";
+  status: "success" | "already_approved";
   google_event_id: string;
 }
 

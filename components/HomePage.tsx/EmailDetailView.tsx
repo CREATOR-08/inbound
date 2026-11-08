@@ -272,7 +272,8 @@ export default function EmailDetailView({
   const currentSanitizedHtml = sanitizedHtml?.emailId === thread.id ? sanitizedHtml : null;
   const safeHtml = currentSanitizedHtml?.html || "";
   const remoteImagesEnabled = remoteImagesEnabledForId === thread.id;
-  const showReply = replyOpenForId === thread.id;
+  const showReply =
+    replyOpenForId === thread.id || replyDraft?.email_id === thread.id;
   const activeReply = replyDraft?.email_id === thread.id ? replyDraft : null;
   const sender = getSenderDetails(thread.sender || "");
   const senderLabel = sender.name || sender.email || "Unknown sender";
@@ -341,12 +342,12 @@ export default function EmailDetailView({
 
   return (
     <article className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-[#0b0c12]">
-      <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center justify-between gap-2 border-b border-white/[0.07] bg-[#101117] px-3 py-3 sm:px-6">
+      <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center justify-between gap-2 border-b border-white/[0.07] bg-[#0d0e14]/95 px-3 py-3 backdrop-blur sm:px-6">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white"
+            className="inline-flex items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-slate-400 transition-colors hover:bg-white/[0.05] hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" />
             <span>Back to inbox</span>
@@ -358,7 +359,7 @@ export default function EmailDetailView({
             onClick={onArchive}
             title="Archive"
             aria-label="Archive email"
-            className="rounded-lg p-2.5 text-slate-400 transition hover:bg-white/[0.05] hover:text-white"
+            className="rounded-lg p-2.5 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
           >
             <Archive className="h-4 w-4" />
           </button>
@@ -367,7 +368,7 @@ export default function EmailDetailView({
             onClick={onMarkRead}
             title={isRead ? "Mark as unread" : "Mark as read"}
             aria-label={isRead ? "Mark as unread" : "Mark as read"}
-            className="rounded-lg p-2.5 text-slate-400 transition hover:bg-white/[0.05] hover:text-white"
+            className="rounded-lg p-2.5 text-slate-400 transition-colors hover:bg-white/[0.06] hover:text-white"
           >
             <Mail className="h-4 w-4" />
           </button>
@@ -376,7 +377,7 @@ export default function EmailDetailView({
             onClick={onDelete}
             title="Delete"
             aria-label="Delete email"
-            className="rounded-lg p-2.5 text-slate-400 transition hover:bg-rose-500/10 hover:text-rose-300"
+            className="rounded-lg p-2.5 text-slate-400 transition-colors hover:bg-rose-500/10 hover:text-rose-300"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -392,7 +393,7 @@ export default function EmailDetailView({
               onClick={onSchedule}
               disabled={isScheduling}
               title="Schedule meeting"
-              className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-wait disabled:opacity-60"
             >
               {isScheduling ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -422,7 +423,7 @@ export default function EmailDetailView({
               </span>
             </div>
 
-            <h1 className="break-words text-2xl font-semibold leading-tight tracking-tight text-slate-50 sm:text-[30px]">
+            <h1 className="break-words text-2xl font-semibold leading-tight tracking-[-0.025em] text-slate-50 sm:text-[30px]">
               {thread.subject || "(no subject)"}
             </h1>
 
@@ -430,13 +431,13 @@ export default function EmailDetailView({
               <div className="flex min-w-0 items-center gap-3">
                 <div
                   aria-hidden="true"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-400/10 text-xs font-semibold text-violet-200 ring-1 ring-violet-300/15"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-violet-300/15 bg-violet-400/[0.08] text-xs font-semibold text-violet-200"
                 >
                   {getInitials(sender.name || sender.email || thread.sender || "")}
                 </div>
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-medium text-slate-100">{senderLabel}</p>
-                  {sender.email && <p className="break-all text-xs text-slate-500">{sender.email}</p>}
+                  <p className="break-words text-[13px] font-semibold text-slate-100">{senderLabel}</p>
+                  {sender.email && <p className="mt-0.5 break-all text-xs text-slate-500">{sender.email}</p>}
                 </div>
               </div>
               <time
@@ -539,13 +540,13 @@ export default function EmailDetailView({
               <button
                 type="button"
                 onClick={handleReply}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 py-3 text-sm text-slate-400 transition hover:border-violet-400/20 hover:text-white"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-4 py-3 text-sm font-medium text-slate-300 transition-colors hover:border-violet-400/25 hover:bg-violet-500/[0.04] hover:text-white"
               >
                 <Mail className="h-4 w-4" />
                 Reply to {thread.sender}
               </button>
             ) : (
-              <section className="overflow-hidden rounded-2xl border border-white/[0.09] bg-[#101117]">
+              <section className="overflow-hidden rounded-2xl border border-white/[0.09] bg-[#101117] shadow-xl shadow-black/10">
                 <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
                   <span className="text-xs font-medium text-slate-300">Reply to {thread.sender}</span>
                   <button
@@ -572,7 +573,7 @@ export default function EmailDetailView({
                       type="button"
                       onClick={() => onDraftReply(thread)}
                       disabled={isDraftingReply}
-                      className="rounded-lg border border-violet-400/20 bg-violet-400/[0.07] px-3 py-2 text-xs font-semibold text-violet-200 disabled:opacity-50"
+                      className="rounded-lg border border-violet-400/20 bg-violet-400/[0.07] px-3 py-2 text-xs font-semibold text-violet-200 transition-colors hover:bg-violet-400/[0.12] disabled:opacity-50"
                     >
                       {isDraftingReply ? "Drafting…" : "Draft with AI"}
                     </button>
@@ -581,7 +582,7 @@ export default function EmailDetailView({
                       onClick={onCopyReply}
                       disabled={!activeReply?.reply_text}
                       aria-label="Copy reply"
-                      className="rounded-lg p-2 text-slate-500 hover:bg-white/5 hover:text-white disabled:opacity-40"
+                      className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-white/5 hover:text-white disabled:opacity-40"
                     >
                       <Copy className="h-4 w-4" />
                     </button>
@@ -590,7 +591,7 @@ export default function EmailDetailView({
                     type="button"
                     onClick={onSendReply}
                     disabled={isSendingReply || !activeReply?.reply_text.trim()}
-                    className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSendingReply ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     {isSendingReply ? "Sending…" : "Send"}

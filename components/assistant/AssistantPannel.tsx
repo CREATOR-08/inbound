@@ -9,7 +9,9 @@ import type {
   AssistantPageContext,
   AssistantQuerySpec,
   AssistantUIAction,
+  AssistantWorkflowStep,
 } from "@/Types/assistant";
+import type { ScheduleProposal } from "@/Types/email";
 import {
   AssistantApiError,
   isAssistantEmailQueryResult,
@@ -24,7 +26,11 @@ type Message = AssistantConversationMessage & {
   actions?: AssistantUIAction[];
   status?: string;
   requiresClarification?: boolean;
-  requiresConfirmation?: boolean;
+  workflowApproval?: {
+    request: AssistantCommandRequest;
+    steps: AssistantWorkflowStep[];
+    state: "pending" | "approved" | "rejected";
+  };
   actionFeedback?: string;
   streaming?: boolean;
 };
@@ -36,6 +42,8 @@ type AssistantPanelProps = {
   availableEmailIds: ReadonlySet<string>;
   onOpenEmail: (emailId: string) => void;
   onOpenResultEmail: (email: AssistantEmailSummary) => void;
+  onOpenCompose: (parameters: Record<string, unknown>) => string;
+  onScheduleProposal: (proposal: ScheduleProposal) => void;
   onNavigateToInbox: () => void;
   onSetFilter: (filter: "ALL" | "URGENT") => void;
   isOpen: boolean;
@@ -52,21 +60,38 @@ const isRetryableError = (error: unknown) =>
 const isApplicationError = (status?: string) =>
   status === "error" || status === "invalid_request" || status === "rate_limited" || status === "unsupported";
 
-const getWorkflowProposal = (data: unknown) => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const workflowTools: AssistantWorkflowStep["tool"][] = [
+  "search_emails",
+  "read_email",
+  "summarize_email",
+  "triage_email",
+  "draft_email",
+  "send_email_reply",
+  "mark_email_read",
+  "mark_email_unread",
+  "archive_emails",
+  "schedule_event",
+  "unknown",
+];
+
+const isAssistantWorkflowStep = (value: unknown): value is AssistantWorkflowStep =>
+  isRecord(value) &&
+  typeof value.tool === "string" &&
+  workflowTools.some((tool) => tool === value.tool) &&
+  isRecord(value.parameters) &&
+  typeof value.description === "string";
+
+const getWorkflowProposal = (data: unknown): AssistantWorkflowStep[] => {
   if (!data || typeof data !== "object" || Array.isArray(data) || !("approved_workflow" in data)) {
     return [];
   }
   const steps = data.approved_workflow;
-  if (!Array.isArray(steps)) return [];
-  return steps.filter(
-    (step): step is { tool: string; description: string } =>
-      typeof step === "object" &&
-      step !== null &&
-      "tool" in step &&
-      typeof step.tool === "string" &&
-      "description" in step &&
-      typeof step.description === "string",
-  );
+  return Array.isArray(steps) && steps.every(isAssistantWorkflowStep)
+    ? steps
+    : [];
 };
 
 type WorkflowResult = {
@@ -84,8 +109,62 @@ type WorkflowResult = {
   } | null;
 };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
+const getCalendarProposal = (
+  data: unknown,
+  selectedEmailId: string | null,
+): ScheduleProposal | null => {
+  if (!isRecord(data) || !isRecord(data.calendar_event)) return null;
+
+  const proposalEnvelope =
+    data.confirmation_required === true
+      ? data
+      : data.calendar_event.confirmation_required === true
+        ? data.calendar_event
+        : null;
+  if (!proposalEnvelope || !isRecord(proposalEnvelope.calendar_event)) return null;
+
+  const event = proposalEnvelope.calendar_event;
+  const emailId =
+    (typeof proposalEnvelope.email_id === "string" && proposalEnvelope.email_id) ||
+    (typeof data.email_id === "string" && data.email_id) ||
+    selectedEmailId;
+  if (
+    !emailId ||
+    typeof event.draft_id !== "string" ||
+    typeof event.title !== "string" ||
+    typeof event.start_time !== "string" ||
+    typeof event.end_time !== "string" ||
+    typeof event.confidence !== "number" ||
+    !Number.isFinite(event.confidence) ||
+    !Array.isArray(event.attendees) ||
+    !event.attendees.every((attendee) => typeof attendee === "string") ||
+    !["PENDING", "APPROVED", "CANCELLED"].includes(String(event.status)) ||
+    (event.ambiguity !== undefined &&
+      event.ambiguity !== null &&
+      typeof event.ambiguity !== "string") ||
+    (event.extraction_status !== undefined &&
+      !["complete", "missing", "ambiguous", "invalid"].includes(
+        String(event.extraction_status),
+      ))
+  ) {
+    return null;
+  }
+
+  return {
+    email_id: emailId,
+    draft_id: event.draft_id,
+    title: event.title,
+    start_time: event.start_time,
+    end_time: event.end_time,
+    status: event.status as ScheduleProposal["status"],
+    attendees: event.attendees,
+    confidence: event.confidence,
+    ...(event.ambiguity === undefined ? {} : { ambiguity: event.ambiguity }),
+    ...(event.extraction_status === undefined
+      ? {}
+      : { extraction_status: event.extraction_status as ScheduleProposal["extraction_status"] }),
+  };
+};
 
 const isWorkflowResultData = (
   value: unknown,
@@ -158,6 +237,8 @@ export default function AssistantPanel({
   availableEmailIds,
   onOpenEmail,
   onOpenResultEmail,
+  onOpenCompose,
+  onScheduleProposal,
   onNavigateToInbox,
   onSetFilter,
   isOpen,
@@ -172,6 +253,7 @@ export default function AssistantPanel({
   const conversationId = useRef<string | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const conversationEnd = useRef<HTMLDivElement | null>(null);
+  const submittedWorkflowApprovals = useRef(new Set<string>());
 
   useEffect(() => {
     conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -221,6 +303,7 @@ export default function AssistantPanel({
         },
       );
       if (!controller.signal.aborted) {
+        const workflowSteps = getWorkflowProposal(result.data);
         setMessages((previous) =>
           previous.map((message) =>
             message.id === assistantMessage.id
@@ -232,11 +315,26 @@ export default function AssistantPanel({
                   data: result.data,
                   status: result.status,
                   requiresClarification: result.requires_clarification,
-                  requiresConfirmation: result.requires_confirmation,
+                  ...(result.requires_confirmation &&
+                  !payload.confirm_workflow &&
+                  workflowSteps.length > 0
+                    ? {
+                        workflowApproval: {
+                          request: payload,
+                          steps: workflowSteps,
+                          state: "pending" as const,
+                        },
+                      }
+                    : {}),
                 }
               : message,
           ),
         );
+        const calendarProposal = getCalendarProposal(
+          result.data,
+          payload.page_context.selected_email_id,
+        );
+        if (calendarProposal) onScheduleProposal(calendarProposal);
         if (result.status === "error" || result.status === "rate_limited") {
           setRetryPayload(payload);
         } else {
@@ -291,6 +389,48 @@ export default function AssistantPanel({
     void submitRequest(payload, false);
   };
 
+  const approveWorkflow = (messageId: string) => {
+    if (requestController.current || submittedWorkflowApprovals.current.has(messageId)) return;
+    const message = messages.find((item) => item.id === messageId);
+    const approval = message?.workflowApproval;
+    if (!approval || approval.state !== "pending") return;
+
+    submittedWorkflowApprovals.current.add(messageId);
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === messageId && item.workflowApproval
+          ? {
+              ...item,
+              workflowApproval: { ...item.workflowApproval, state: "approved" },
+            }
+          : item,
+      ),
+    );
+    void submitRequest(
+      {
+        ...approval.request,
+        approved_workflow: approval.steps,
+        confirm_workflow: true,
+      },
+      false,
+    );
+  };
+
+  const rejectWorkflow = (messageId: string) => {
+    if (requestController.current) return;
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === messageId &&
+        item.workflowApproval?.state === "pending"
+          ? {
+              ...item,
+              workflowApproval: { ...item.workflowApproval, state: "rejected" },
+            }
+          : item,
+      ),
+    );
+  };
+
   const stopGeneration = () => requestController.current?.abort();
 
   const openResultEmail = (email: AssistantEmailSummary) => {
@@ -306,6 +446,7 @@ export default function AssistantPanel({
         onClose();
       },
       navigateToInbox: onNavigateToInbox,
+      openCompose: onOpenCompose,
       setFilter: onSetFilter,
     });
     setMessages((current) =>
@@ -323,7 +464,7 @@ export default function AssistantPanel({
           onClick={onOpen}
           aria-label="Open AI assistant"
           aria-expanded={false}
-          className="fixed bottom-5 right-5 z-30 flex h-12 items-center gap-2 rounded-full border border-violet-300/20 bg-violet-600 px-4 text-sm font-medium text-white shadow-xl shadow-violet-950/40 transition hover:bg-violet-500"
+          className="fixed bottom-4 right-4 z-30 flex h-11 items-center gap-2 rounded-full border border-violet-300/20 bg-violet-600 px-4 text-sm font-medium text-white shadow-lg shadow-black/30 transition-colors hover:bg-violet-500 sm:bottom-5 sm:right-5"
         >
           <Sparkles className="h-4 w-4" aria-hidden="true" />
           AI Assistant
@@ -332,33 +473,20 @@ export default function AssistantPanel({
       <aside
         aria-label="AI Assistant"
         aria-hidden={!isOpen}
-        className={`fixed inset-y-0 right-0 z-40 flex h-dvh w-[min(360px,100vw)] flex-col border-l border-white/[0.08] bg-[#0e1017] text-slate-100 shadow-2xl shadow-black/40 ${isOpen ? "" : "hidden"
+        className={`fixed inset-y-0 right-0 z-40 flex h-dvh w-[min(380px,100vw)] flex-col border-l border-white/[0.08] bg-[#0d0e14] text-slate-100 shadow-2xl shadow-black/40 ${isOpen ? "" : "hidden"
           }`}
       >
         {/* Header */}
-        <div className="flex h-[68px] shrink-0 items-center justify-between border-b border-white/[0.08] px-5">
+        <div className="flex h-[68px] shrink-0 items-center justify-between border-b border-white/[0.08] px-4 sm:px-5">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10">
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M12 2.5L14.5 9.5L21.5 12L14.5 14.5L12 21.5L9.5 14.5L2.5 12L9.5 9.5L12 2.5Z"
-                  stroke="#a78bfa"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-              </svg>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-violet-400/15 bg-violet-500/[0.08]">
+              <Sparkles className="h-4 w-4 text-violet-300" aria-hidden="true" />
             </div>
 
             <div>
               <h2 className="text-sm font-semibold tracking-wide">AI Assistant</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
-                Your personal inbox assistant
+                Your inbox, in context
               </p>
             </div>
           </div>
@@ -406,18 +534,18 @@ export default function AssistantPanel({
 
         {/* Conversation */}
         <div
-          className="flex-1 overflow-y-auto px-5 py-5"
+          className="flex-1 overflow-y-auto px-4 py-5 sm:px-5"
           aria-live="polite"
           aria-busy={isThinking}
         >
           {messages.length === 0 ? (
             <div className="flex min-h-full flex-col">
               <div className="mb-7 mt-5">
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border border-violet-400/20 bg-gradient-to-br from-violet-500/15 to-indigo-500/10">
-                  <span className="text-2xl text-violet-300">✦</span>
+                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-violet-400/15 bg-violet-500/[0.08]">
+                  <Sparkles className="h-5 w-5 text-violet-300" />
                 </div>
 
-                <h3 className="text-[25px] font-semibold leading-tight tracking-tight">
+                <h3 className="text-[24px] font-semibold leading-tight tracking-[-0.025em]">
                   Your inbox,
                   <br />
                   <span className="text-violet-300">
@@ -441,7 +569,7 @@ export default function AssistantPanel({
                     key={suggestion.label}
                     onClick={() => void handleSend(suggestion.prompt)}
                     disabled={isThinking}
-                    className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.015] p-3.5 text-left transition hover:border-violet-400/30 hover:bg-violet-500/[0.06]"
+                    className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.015] p-3 text-left transition-colors hover:border-violet-400/25 hover:bg-violet-500/[0.04]"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-sm text-violet-300 transition group-hover:bg-violet-500/10">
                       {suggestion.icon}
@@ -507,18 +635,18 @@ export default function AssistantPanel({
                       }`}
                   >
                     {message.role === "assistant" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-sm text-violet-300">
-                        ✦
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-400/10 bg-violet-500/[0.08] text-violet-300">
+                        <Sparkles className="h-4 w-4" aria-hidden="true" />
                       </div>
                     )}
 
                     <div className="min-w-0 max-w-[85%] flex-1">
                       <div
                         className={`rounded-2xl px-3.5 py-3 text-[12px] leading-6 ${message.role === "user"
-                            ? "rounded-br-md bg-violet-500/15 text-violet-100"
+                            ? "rounded-br-md border border-violet-400/15 bg-violet-500/[0.12] text-violet-100"
                             : isApplicationError(message.status)
                               ? "rounded-tl-md border border-rose-500/20 bg-rose-500/[0.06] text-rose-200"
-                              : "rounded-tl-md border border-white/[0.07] bg-white/[0.025] text-slate-300"
+                              : "rounded-tl-md border border-white/[0.07] bg-[#13151d] text-slate-300"
                           }`}
                         role={message.role === "assistant" && isApplicationError(message.status) ? "alert" : undefined}
                       >
@@ -582,19 +710,42 @@ export default function AssistantPanel({
                           )}
                         </div>
                       )}
-                      {message.role === "assistant" && message.requiresConfirmation && (
+                      {message.role === "assistant" && message.workflowApproval && (
                         <div className="mt-3 space-y-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-200">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-200">
                             Proposed workflow — not executed
                           </p>
-                          {getWorkflowProposal(message.data).map((step, index) => (
+                          {message.workflowApproval.steps.map((step, index) => (
                             <p key={`${step.tool}-${index}`} className="text-[11px] text-slate-300">
                               {index + 1}. {step.description}
                             </p>
                           ))}
-                          <p className="text-[10px] leading-4 text-slate-500">
-                            Approval is unavailable because the backend does not bind approval to this exact plan.
-                          </p>
+                          {message.workflowApproval.state === "pending" ? (
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                type="button"
+                                disabled={isThinking}
+                                onClick={() => approveWorkflow(message.id)}
+                                className="rounded-lg bg-violet-600 px-3 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-violet-500 disabled:opacity-50"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isThinking}
+                                onClick={() => rejectWorkflow(message.id)}
+                                className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] font-medium text-slate-300 transition-colors hover:border-rose-400/25 hover:bg-rose-400/[0.06] hover:text-rose-200 disabled:opacity-50"
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          ) : (
+                            <p role="status" className="text-[10px] leading-4 text-slate-400">
+                              {message.workflowApproval.state === "rejected"
+                                ? "Rejected. No operation was executed."
+                                : "Approval submitted. The workflow request is being processed."}
+                            </p>
+                          )}
                         </div>
                       )}
                       {message.role === "assistant" && workflowResults.length > 0 && (
@@ -692,13 +843,13 @@ export default function AssistantPanel({
         </div>
 
         {/* Input */}
-        <div className="shrink-0 border-t border-white/[0.08] p-4">
+        <div className="shrink-0 border-t border-white/[0.08] bg-[#0b0c12] p-3 sm:p-4">
           <form
             onSubmit={(event) => {
               event.preventDefault();
               void handleSend();
             }}
-            className="rounded-2xl border border-white/[0.10] bg-[#141620] p-2 transition focus-within:border-violet-400/40"
+            className="rounded-xl border border-white/[0.10] bg-[#13151d] p-2 transition-colors focus-within:border-violet-400/40 focus-within:ring-2 focus-within:ring-violet-400/10"
           >
             <textarea
               value={input}
@@ -717,7 +868,7 @@ export default function AssistantPanel({
               placeholder="Ask anything about your inbox..."
               rows={2}
               maxLength={2000}
-              className="w-full resize-none bg-transparent px-2 py-2 text-[12px] leading-5 text-slate-200 outline-none placeholder:text-slate-600"
+              className="w-full resize-none bg-transparent px-2 py-2 text-[13px] leading-5 text-slate-200 outline-none placeholder:text-slate-600"
             />
 
             <div className="flex items-center justify-between px-1 pb-1">
@@ -731,7 +882,7 @@ export default function AssistantPanel({
                   onClick={stopGeneration}
                   aria-label="Stop generating"
                   title="Stop generating"
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/80 text-white transition hover:bg-rose-400"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose-500/80 text-white transition-colors hover:bg-rose-400"
                 >
                   <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
                 </button>
@@ -740,7 +891,7 @@ export default function AssistantPanel({
                   type="submit"
                   disabled={!input.trim()}
                   aria-label="Send message"
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500 text-white transition hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-30"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-600 text-white transition-colors hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-30"
                 >
                   <svg
                     width="17"

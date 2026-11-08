@@ -341,7 +341,12 @@ export function useEmailActions({
             : email,
         ),
       );
-      notify(`Meeting added to Google Calendar (${result.google_event_id}).`, "success");
+      notify(
+        result.status === "already_approved"
+          ? `This meeting was already added to Google Calendar (${result.google_event_id}).`
+          : `Meeting added to Google Calendar (${result.google_event_id}).`,
+        "success",
+      );
     },
     [notify, scheduleProposal, setEmails],
   );
@@ -361,6 +366,7 @@ export function useEmailActions({
     sendCurrentReply,
     copyReply,
     extractMeeting,
+    openScheduleProposal: (proposal: ScheduleProposal) => setScheduleProposal(proposal),
     closeScheduleProposal: () => setScheduleProposal(null),
     confirmScheduledEmail,
     archiveEmail,

@@ -170,6 +170,57 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
     openEmail(emailId);
   };
 
+  const openAssistantCompose = (parameters: Record<string, unknown>) => {
+    let targetThread = activeThread;
+    let replyBody: string | undefined;
+    if (Object.keys(parameters).length > 0) {
+      const recipient = parameters.to;
+      const subject = parameters.subject;
+      const body = parameters.body;
+      if (
+        Object.keys(parameters).length !== 3 ||
+        typeof recipient !== "string" ||
+        typeof subject !== "string" ||
+        typeof body !== "string"
+      ) {
+        return "This compose action has invalid parameters.";
+      }
+
+      const getSenderAddress = (sender: string) =>
+        sender.match(/<([^<>]+)>/)?.[1] ??
+        sender.match(/\[([^\]]+)\]\(mailto:[^)]+\)/i)?.[1] ??
+        sender.trim();
+      const normalizeSubject = (subject: string) =>
+        subject.trim().replace(/^(re:\s*)+/i, "").toLowerCase();
+
+      const matchesComposeTarget = (thread: (typeof threads)[number]) =>
+        getSenderAddress(recipient).toLowerCase() ===
+          getSenderAddress(thread.sender).toLowerCase() &&
+        normalizeSubject(subject) === normalizeSubject(thread.subject);
+      if (!targetThread || !matchesComposeTarget(targetThread)) {
+        const matchingThreads = threads.filter(matchesComposeTarget);
+        if (matchingThreads.length === 0) {
+          return "No available email matches the recipient and subject for this reply.";
+        }
+        if (matchingThreads.length > 1) {
+          return "More than one email matches this reply. Open the intended email first.";
+        }
+        targetThread = matchingThreads[0];
+      }
+      replyBody = body;
+    }
+
+    if (!targetThread) {
+      return "Select an email to use the existing reply composer.";
+    }
+
+    openEmail(targetThread.id);
+    emailActions.openReply(targetThread);
+    if (replyBody !== undefined) emailActions.setReplyText(replyBody);
+    setIsAssistantOpen(false);
+    return "Opened the reply composer for the email.";
+  };
+
   return (
     <>
       <main className="relative flex h-screen w-screen overflow-hidden bg-[#0b0c12] font-sans text-slate-100">
@@ -246,6 +297,8 @@ export default function Inbox({ user, onSignOut, signOutError }: InboxProps) {
         availableEmailIds={new Set(threads.map((thread) => thread.id))}
         onOpenEmail={openAssistantActionEmail}
         onOpenResultEmail={openAssistantResult}
+        onOpenCompose={openAssistantCompose}
+        onScheduleProposal={emailActions.openScheduleProposal}
         onNavigateToInbox={() => setSelectedThreadId("")}
         onSetFilter={(filter) => {
           setCurrentFilter(filter);
