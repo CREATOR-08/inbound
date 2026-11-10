@@ -5,7 +5,7 @@ act on their Gmail inbox through a modern web interface and a
 context-aware AI assistant.
 
 > **Repository:** Frontend\
-> **Backend:** [Inbound AI Backend](../inbound_backend) --- replace this
+> **Backend:** [Inbound AI Backend](https://github.com/CREATOR-08/inbound_backend) --- replace this
 > with the actual backend repository URL\
 > **Status:** Active development
 
